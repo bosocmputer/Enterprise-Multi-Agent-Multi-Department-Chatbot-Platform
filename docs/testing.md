@@ -2,31 +2,137 @@
 
 ## Required Gates
 
+Current required gate for the production-ready demo:
+
 ```bash
-# Backend
-# npm test
-
-# Frontend
-# not applicable until an admin UI exists
-
-# Integration / smoke
-# npm run build
-# curl -fsS http://localhost:<port>/health
+npm test
+npm run build
+curl -fsS http://localhost:<port>/health
+curl -fsS -H "Authorization: Bearer <token>" http://localhost:<port>/ready
+BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-smoke.sh
 ```
+
+## Unit Tests
+
+| Area | Required cases |
+| --- | --- |
+| Business Profile | schema validation, missing profile, disabled intent, tenant examples, alias expansion, invalid profile rollback behavior. |
+| Query parser/understanding | stock, price, stock+price, search-only, unsupported text, Thai/English variants from Business Profile, product code, barcode-like input, context-only follow-up. |
+| Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
+| Dedup | duplicate webhook event sends at most one reply. |
+| SML client | allowed tool call, blocked write tool, timeout, malformed JSON, missing `content[0].text`, schema mismatch. |
+| Cache | hit/miss, TTL choice, no error cached as success, short negative cache. |
+| Formatter | no match, multi match, success with stock only, success with price only, timeout fallback. |
+| Redaction | logs do not include tokens, raw secrets, or large raw SML payloads. |
+
+Latest local run on 2026-06-10:
+
+- `npm test`: 11 files, 35 tests passed.
+- `npm run build`: passed.
+
+## Integration Tests
+
+Use mocked channel and mocked SML first:
+
+- Telegram private chat stock+price lookup.
+- Telegram group without mention is ignored.
+- Telegram group `/stock` command returns lookup.
+- SML search returns no candidates.
+- SML search returns multiple candidates.
+- SML search returns one candidate and stock/price succeed.
+- SML stock succeeds and price times out.
+- Redis unavailable behavior follows architecture decision.
+
+Current covered cases:
+
+- Redis JSON cache set/get/TTL, dedup claim, rate-limit window, readiness ping.
+- Telegram polling private message sends reply.
+- Telegram group command sends reply.
+- Telegram group without command/mention is ignored.
+- Duplicate Telegram update is claimed once and does not send a duplicate reply.
+- Telegram numeric selection after a multiple-match reply uses short Redis context.
+- Invalid/expired numeric selection returns a safe clarification.
+- LINE signature verification accepts valid HMAC and rejects invalid signatures.
+- LINE private and group-prefix messages send replies; group chatter is ignored.
+- Production internal endpoints require bearer auth.
+- Exact-code price-only lookup enriches the display name when SML search returns it.
+- `/metrics` exposes lookup counters/histograms after internal smoke.
+- SML timeout/failure/circuit-open path returns a safe fallback through orchestrator tests.
+- Alert dedup prevents repeated ops-chat messages for the same alert key.
+- Business Profile v1 validates `profiles/construction-demo.json` and drives parser phrases, aliases, help examples, and fallback hints.
+
+When SML endpoint is reachable, run read-only smoke only:
+
+1. `GET /health`
+2. `GET /tools`
+3. `search_product`
+4. `get_stock_balance`
+5. `get_product_price`
+
+Never call `create_sale_reserve` in standard smoke tests.
 
 ## Acceptance Scenarios
 
-- Happy path: department LINE webhook enqueues a job and replies through the correct LINE channel.
-- Empty state: unsupported text or missing ERP record returns a helpful department-specific response.
-- Permission failure: mechanic asks for financial report and the system blocks before any ERP MCP call.
-- External API timeout: LLM or MCP timeout returns safe fallback and records retry/error metrics.
-- Duplicate/retry/idempotency: same LINE event/message ID is processed once despite retries.
-- Migration rollback: no migrations yet; define before adding persistent storage beyond Redis.
+- Happy path: Telegram private message asks stock and price, bot replies with product code/name/unit/stock/price.
+- Domain-neutral profile: adding a new tenant Business Profile changes examples/aliases without source-code edits.
+- LINE private: verified LINE webhook asks price and gets a reply.
+- LINE group: normal chatter is ignored; @mention stock query gets a reply.
+- No match: bot asks for product code/model/brand, not a fabricated answer.
+- Multiple match: bot asks user to choose among top candidates.
+- Numeric follow-up: after multiple match, replying `1` chooses candidate 1 with the previous stock/price intent.
+- Intent follow-up: after a successful product lookup, replying `ราคา` or `สต็อก` uses the last product context.
+- Context follow-up: after asking about a product class, replying only a brand/model phrase inherits the previous stock/search intent if confidence is high.
+- Duplicate event: same webhook event is processed once.
+- SML timeout: user receives safe fallback within 3 seconds.
+- SML malformed response: bot logs schema error and does not expose raw payload.
+- Blocked write tool: `create_sale_reserve` cannot be called from chatbot lookup flow.
+- Rate limit: noisy user/group is throttled without affecting other chats.
+
+## Performance Tests
+
+Initial targets:
+
+- exact cached lookup p95 < 300ms
+- exact SML lookup p95 < 1.0s
+- keyword search + stock + price p95 < 1.5s
+- timeout fallback under 3.0s
+
+Test with:
+
+- repeated exact product code
+- repeated common keyword
+- repeated common keyword with Business Profile and alias cache enabled
+- 20 concurrent Telegram-style requests
+- SML slow response simulation
+- Redis cache disabled
 
 ## Manual QA
 
-- Browser: not applicable until admin UI exists.
-- Admin flow: not applicable until admin UI exists.
-- LINE group flow: bot ignores normal group chatter and responds only to @mention.
-- LINE 1-1 flow: department-specific bot remembers prior context within isolated session.
-- Production smoke: verify health endpoint, Redis connectivity, queue worker active state, LINE signature validation, and one mocked MCP policy decision.
+- Telegram private flow: ask by product code, ask by keyword, ask follow-up question.
+- Telegram group flow: no mention ignored; command/mention works.
+- LINE private flow: raw-body signature validation works.
+- LINE group flow: mention gate works.
+- SML endpoint: confirm production vs sandbox before any real-data checks.
+- Logs: confirm request IDs, cache status, SML latency, and no secret leakage.
+
+Latest server smoke on `192.168.2.109:3060`:
+
+- Telegram `getMe`: passed for bot username `employee_assistant_248_bot`.
+- Telegram webhook cleanup: `deleteWebhook` with pending update cleanup passed before polling was enabled.
+- `GET /health`: passed.
+- Unauthenticated production `GET /ready`: returned `401`.
+- Authenticated `GET /ready`: currently degraded with `sml: unavailable` and `redis: ok` because `192.168.2.248:3515` is not accepting TCP connections.
+- `GET /metrics`: must expose `parts_lookup_requests_total` and `parts_lookup_sml_tool_duration_ms`.
+- Authenticated `POST /internal/lookup` while SML is down: returned safe fallback, not fabricated stock/price.
+- Full SML data smoke with `PAINT-01424` and `น้ำมัน ราคา` must be re-run when SML MCP is back.
+
+## Release Gate
+
+Before pilot:
+
+- Tests/build pass.
+- SML read-only smoke passes.
+- `create_sale_reserve` and write tools are absent from chatbot allowlist.
+- Channel secrets are loaded from secrets/env, not docs/source.
+- Rollback path documented.
+- Alerts for SML, Redis, and reply failures are configured or consciously deferred for pilot.

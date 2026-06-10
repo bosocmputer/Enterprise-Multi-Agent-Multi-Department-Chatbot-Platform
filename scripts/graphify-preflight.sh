@@ -50,7 +50,7 @@ if find graphify-out -type f \( \
   fail "graphify-out contains files that should not be committed"
 fi
 
-if grep -Eiq '(^|[/"])(\.env|backups|node_modules|dist|build|\.next|\.vite|coverage|screenshots?|tmp|vendor)([/"]|$)' "$GRAPH_PATH"; then
+if grep -Eiq '(^|[/"])(\.env|backups|node_modules|dist|build|\.next|\.vite|coverage|screenshots?|tmp|vendor)/' "$GRAPH_PATH"; then
   fail "$GRAPH_PATH references ignored runtime, build, or artifact paths"
 fi
 

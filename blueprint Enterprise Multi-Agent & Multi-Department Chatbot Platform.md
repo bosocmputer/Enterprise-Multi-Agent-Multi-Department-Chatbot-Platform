@@ -1,160 +1,397 @@
-# 🏎️ Enterprise Multi-Agent & Multi-Department Chatbot Platform
+# Blueprint: Domain-Agnostic Inventory Lookup Chatbot Platform
 
-> **Enterprise-Grade, Multi-Tenant Architecture (4 LINE OAs + MCP + ERP)**
-> แพลตฟอร์มแชทบอทอัจฉริยะรองรับการแยก 4 แผนกอย่างอิสระด้วยระบบ @Mention, มีระบบคิวงานกระจายโหลดแนวราบ, การจำบริบทย้อนหลังแบบแยกสิทธิ์ และสลับค่าย AI ได้ตามต้องการ
+Last updated: 2026-06-10
 
----
+## 1. Product Definition
 
-## 1. คุณสมบัติสถาปัตยกรรมระดับ Production (Production-Grade Specs)
+Build a speed-first internal chatbot that lets staff ask for product availability and price from chat across different business domains.
 
-1. **Multi-Tenant Integration (4 LINE OAs):** รองรับการเชื่อมต่อกับ LINE OA แยกอิสระ 4 แผนก (แผนกขาย, จัดซื้อ, บัญชี, ช่างซ่อม) วิ่งเข้าสู่ศูนย์กลางประมวลผลเดียว ประหยัดค่า Infrastructure สูงสุด
-2. **Role-Based MCP Access Control (RBAC):** คัดกรองและจำกัดสิทธิ์การเข้าถึงข้อมูลระบบ ERP หลังบ้านตามแผนก (เช่น แผนกช่างไม่สามารถดึงข้อมูลรายงานการเงินของแผนกบัญชีได้)
-3. **Group @Mention & Context Isolation:** กรองข้อความในกลุ่มไลน์อย่างแม่นยำด้วย LINE Mention Component และแยกเก็บความจำของพนักงานรายบุคคลในกลุ่มโดยไม่มีการปนบริบทกัน (`session:dept:{id}:group:{id}:user:{id}`)
-4. **Idempotency De-duplication:** บล็อกเหตุการณ์ข้อความกระตุกหรือพนักงานกดส่งข้อความเบิ้ลซ้ำซ้อนภายในเวลาไล่เลี่ยกันด้วยเทคนิค Redis Atomic Lock
-5. **Asynchronous Architecture:** แอนิเมชันข้อมูลรับส่งจาก LINE Webhook จะตอบกลับ `HTTP 200 OK` ภายในเวลา < 50ms แล้วปล่อยให้แบ็คกราวด์วอร์กเกอร์ (`BullMQ`) คุยกับ LLM และ ERP อย่างเสถียร ไม่เกิดปัญหา Timeout 5 วินาทีของ LINE
+The platform must not hardcode business-specific product keywords, brands, aliases, or examples in source code. Each tenant/business supplies a Business Profile that describes enabled intents, vocabulary, examples, aliases, and data-source settings.
 
----
+The first production shape is a read-only lookup service:
 
-## 2. แผนผังระบบภาพรวม (System Architecture Blueprint)
+- Staff can ask from Telegram private chat, Telegram groups, LINE 1-1 chats, and LINE groups.
+- The bot answers stock and price using SML MCP read-only tools.
+- The bot is optimized for fast deterministic lookup before AI, using tenant-configured intent phrases and examples.
+- AI/LLM parsing is optional and used only for ambiguous messages.
+- Write actions such as sale reservation creation are out of scope until explicitly approved.
+
+## 2. Goals
+
+- Answer common stock/price questions quickly and consistently.
+- Make Telegram the easiest pilot/test channel before LINE rollout.
+- Keep SML as the source of truth and avoid duplicated business rules.
+- Support new business domains by changing tenant Business Profile data, not chatbot source code.
+- Prevent accidental replies in noisy groups with mention/command gates.
+- Avoid hallucinated product, stock, or price information.
+- Provide auditability for who asked what and which SML data was used.
+
+## 3. Non-Goals For MVP
+
+- No `create_sale_reserve` or other write endpoint.
+- No admin UI.
+- No multi-department RBAC unless later business scope needs it.
+- No generic SQL or direct database access from the bot.
+- No full product master sync unless SML keyword search is not good enough.
+- No LLM call for every request.
+- No hardcoded tenant product terms, brand aliases, or business-specific keyword lists in source code.
+- No long-term customer conversation memory.
+
+## 4. Primary Use Cases
+
+### 4.1 Stock And Price
+
+User asks, using a phrase natural to that tenant:
 
 ```text
-       [ 📱 LINE OA 1: แผนกขาย ]   ────┐
-       [ 📱 LINE OA 2: จัดซื้อ  ]   ────┼─> (HTTPS POST Webhook)
-       [ 📱 LINE OA 3: บัญชี   ]   ────┼─> [ 🔒 Cloudflare / ALB ] (Rate Limiting & Guard)
-       [ 📱 LINE OA 4: ช่างซ่อม ]   ────┘
-                                                   │
-                                                   ▼
-                                      ┌────────────────────────┐
-                                      │  🚀 Fastify Webhooks   │ (Stateless Nodes x N)
-                                      └───────────┬────────────┘
-                                                  │
-     [🔒 Redis Deduplicate Lock] ─────────────────┼─> (ตรวจเบิ้ลข้อความภายในชั่วขณะ)
-     [🎯 LINE Mention & Dept Classifier] ────────┘─> (คัดแยกรหัสแผนกจาก Bot Destination)
-                                                  │
-                                                  ▼ (โยนงานลงคิวด่วน: < 10ms)
-                                      ┌────────────────────────┐
-                                      │    🛑 Redis Cluster    │ <══ [💾 Dept-Aware Sessions]
-                                      │   (BullMQ Engine)      │ <══ [📊 Semantic Vector Cache]
-                                      └───────────┬────────────┘
-                                                  │
-                                                  │ (Job Distribution via BullMQ)
-                                                  ▼
-                                      ┌────────────────────────┐
-                                      │  ⚙️ AI & MCP Workers   │ (Background Workers Pool x N)
-                                      │   [🛡️ Circuit Breaker]  │
-                                      └─────┬────────────┬─────┘
-                                            │            │
-            (Dynamic System Prompt)         │            │ (Persistent JSON-RPC Pool)
-            & Managed Tools Filter          ▼            ▼
-                               ┌───────────────┐    ┌─────────────────────────────────┐
-                               │ 🧠 Cloud LLM  │    │    🔌 MCP Client Interface      │
-                               │ OpenAI/Claude │    └────────────────┬────────────────┘
-                               └───────────────┘                     │
-                                                                     ▼
-                                                    ┌─────────────────────────────────┐
-                                                    │  ⚙️ ERP MCP Server (Internal)    │
-                                                    └────────────────┬────────────────┘
-                                                                     │
-                                                                     ▼ (คุมสิทธิ์สืบค้น SQL)
-                                                    ┌─────────────────────────────────┐
-                                                    │ 📦 DB Read Replica / App Cache  │
-                                                    └─────────────────────────────────┘
+<product keyword> มีไหม ราคาเท่าไร
 ```
 
----
+System behavior:
 
-## 3. ตารางบริหารสิทธิ์และบริการของแต่ละแผนก (Department Matrix)
+1. Normalize channel payload into a common internal message.
+2. Load the tenant Business Profile.
+3. Detect intent as `stock_price` from configured intent phrases, context, or optional LLM parse.
+4. Extract and normalize product keyword.
+5. Search product through cache or SML `search_product`.
+6. If exactly one confident product is found, fetch stock and price.
+7. Reply with product code, name, unit, stock, price, and freshness.
 
-| แผนก (LINE OA)           | ฟังก์ชันประจำบทบาท (System Prompt Content)                      | รายชื่อ MCP Tools ที่ได้รับอนุญาต                        |
-| :----------------------- | :-------------------------------------------------------------- | :------------------------------------------------------- |
-| **sales (แผนกขาย)**      | เน้นเช็คสต็อกอะไหล่ ค้นหาสินค้าทดแทน แนะนำข้อมูลราคาขาย         | `check_stock`, `check_price`, `find_alternatives`        |
-| **purchasing (จัดซื้อ)** | ติดตามสถานะใบสั่งซื้อ (PO) เช็คราคาส่งผู้ผลิต ตรวจปริมาณขั้นต่ำ | `check_po_status`, `supplier_pricing`, `low_stock_alert` |
-| **accounting (บัญชี)**   | ตรวจสอบยอดขายประจำวัน ดึงประวัติบิลค้างจ่าย เช็คใบกำกับภาษี     | `get_sales_report`, `check_invoice`, `unpaid_bills`      |
-| **mechanic (ช่างซ่อม)**  | ค้นหาคู่มือซ่อมเทคนิค ขั้นตอนการติดตั้ง ตรวจตารางงานซ่อม        | `query_manual`, `open_job_card`, `mechanic_schedule`     |
+### 4.2 Product Code Lookup
 
----
+User asks:
 
-## 4. สถานการณ์จำลองการใช้งานจริง (Use Case Simulations)
+```text
+A001 ราคา
+```
 
-### 📌 Use Case 1: แผนกขาย (คุยเดี่ยว 1-1) - การเช็คสต็อกและการจดจำบริบท
+System behavior:
 
-- **บริบท:** พนักงานขายกำลังคุยกับลูกค้าหน้าร้าน และต้องการความเร็วในการเช็คสต็อกสลับสินค้าทดแทน
-- **พฤติกรรมการสนทนา:**
-  - _พนักงาน:_ "ผ้าเบรคหน้า Vigo ตัวธรรมดามีของไหม"
-  - _ระบบหลังบ้าน:_ แมตช์ `deptId: sales` ➡️ อนุญาตให้ใช้ Tool `check_stock` ➡️ ค้นหาใน ERP ➡️ ส่งข้อมูลกลับ
-  - _บอท (LINE):_ _(ส่ง LINE Flex Message แสดงตัวเลือกสินค้า)_ "📦 **ผ้าเบรคหน้า Vigo (เกรดมาตรฐาน)** ยี่ห้อ X คงเหลือ **3 ชุด** ราคา 1,200 บาท"
-  - _พนักงาน (พิมพ์ต่อทันที):_ "แล้วถ้าเป็นเกรดท็อปล่ะ" _(เช็คความจำ Context Memory)_
-  - _ระบบหลังบ้าน:_ ดึง Session ประวัติเก่าจำได้ว่าคุยเรื่อง "ผ้าเบรคหน้า Vigo" ➡️ เรียก Tool `find_alternatives` และ `check_stock` อัตโนมัติ
-  - _บอท (LINE):_ "ตัวท็อปจะเป็น **เกรดเซรามิก ยี่ห้อ Y** ครับ มีของ **5 ชุด** ราคา 1,850 บาท รับตัวนี้แทนไหมครับ?"
+1. Recognize likely product code.
+2. Skip broad search when the code is exact.
+3. Fetch price, optionally stock if requested.
+4. Reply with concise result.
 
-### 📌 Use Case 2: แผนกช่างซ่อม (คุยใน LINE Group) - การคัดกรอง @Mention และความปลอดภัย
+### 4.3 Ambiguous Product
 
-- **บริบท:** กลุ่ม LINE ชื่อ "ทีมช่างสาขาใหญ่" มีช่างอยู่ 10 คน ช่างกำลังคุยงานกันปกติและต้องการดึงคู่มือรถยนต์
-- **พฤติกรรมการสนทนา:**
-  - _ช่าง A:_ "วันนี้เคส Revo บ่ายสองใครเป็นเจ้าของอู่"
-  - _บอท:_ _(นิ่งเฉย ไม่ตอบโต้ เพราะไม่มีการ @Mention ทำให้ไม่เสียค่า API LLM)_
-  - _ช่าง B:_ "น่าจะเป็นช่างนนท์นะ พี่กำลังรื้อเครื่องอยู่"
-  - _ช่าง A:_ "**@บอทช่างซ่อม** ขอดูคู่มือแรงขันฝาสูบเครื่อง 2GD Toyota Revo หน่อย"
-  - _ระบบหลังบ้าน:_ ตรวจพบ LINE Mention (`isSelf: true`) ➡️ กรองข้อความ ➡️ ดึงข้อมูลเฉพาะสิทธิ์แผนกช่างรัน Tool `query_manual`
-  - _บอท (LINE):_ _(ส่ง Flex Message การ์ดคู่มือ)_ "🔧 **ค่าแรงขันฝาสูบเครื่อง 2GD (Revo):** ขั้นตอนที่ 1: 35 N·m / ขั้นตอนที่ 2: หมุนตามแนว 90 องศา / ขั้นตอนที่ 3: หมุนตามแนวอีก 90 องศา ค่ะ"
+User asks:
 
-### 📌 Use Case 3: แผนกบัญชี (คุยเดี่ยว 1-1) - การสืบค้นข้อมูลระดับบริหาร
+```text
+ตัวท็อปมีไหม
+```
 
-- **บริบท:** ผู้จัดการบัญชีต้องการตรวจสอบยอดสรุปทางการเงินเพื่อส่งยอดประจำวัน
-- **พฤติกรรมการสนทนา:**
-  - _พนักงานบัญชี:_ "สรุปยอดขายของสาขาบางนา วันนี้ให้หน่อย"
-  - _ระบบหลังบ้าน:_ แมตช์ `deptId: accounting` ➡️ ตรวจเช็คสิทธิ์ ➡️ อนุญาตให้เรียกใช้เครื่องมือ `get_sales_report` เพื่อดึงข้อมูล API สรุปงบการเงิน
-  - _บอท (LINE):_ "📊 **สรุปยอดขายสาขาบางนา ประจำวันนี้:**
-    - ยอดขายรวม: 145,200 บาท
-    - เงินสด/โอน: 110,000 บาท
-    - เครดิต (บิลค้างชำระ): 35,200 บาท
-      ต้องการให้แนบไฟล์ Excel รายละเอียดบิลด้วยไหมคะ?"
+System behavior:
 
-### 📌 Use Case 4: พนักงานลองดีข้ามแผนก (Cross-Department Security Violation)
+1. Use last session context if available.
+2. If context is insufficient, ask a disambiguation question.
+3. If LLM parser is enabled, use it only to produce structured search terms, never final facts.
 
-- **บริบท:** ช่างซ่อมรถยนต์ แอบแอดไลน์หรือดักแท็กบอทเพื่อพยายามขอดูรายงานการเงินของร้าน
-- **พฤติกรรมการสนทนา:**
-  - _ช่างซ่อม (พิมพ์ใน LINE แผนกช่าง):_ "**@บอทช่างซ่อม** ขอดูยอดขายร้านวันนี้หน่อย"
-  - _ระบบหลังบ้าน:_ ดักจับ `deptId: mechanic` ➡️ ทำการสแกนความต้องการพบว่าเป็น Intent ด้านการเงิน ➡️ ตรวจตารางสิทธิ์พบว่า แผนกช่าง **ไม่มีสิทธิ์** เข้าถึง Tool `get_sales_report` ➡️ บล็อกการเรียกใช้ ERP ทันทีเพื่อความปลอดภัย
-  - _บอท (LINE):_ "⚠️ **ขออภัยค่ะ** บอทแผนกช่างซ่อมไม่ได้รับอนุญาตให้เข้าถึงข้อมูลรายงานทางการเงินและยอดขายของระบบร้านค้า หากต้องการข้อมูลกรุณาติดต่อแผนกบัญชีโดยตรงค่ะ"
+### 4.4 Group Chat
 
----
+System behavior:
 
-## 5. โครงสร้างโฟลเดอร์สำหรับระบบขยายสาขาและแผนก (Directory Structure)
+- Telegram group: respond only when the bot is mentioned, the message replies to the bot, or a supported command is used.
+- LINE group: respond only when the LINE mention component indicates the bot was mentioned or a configured prefix is used.
+- Private chats: respond to supported lookup questions directly.
 
-````text
-multi-tenant-parts-bot/
-├── src/
-│   ├── @types/                 # โครงสร้าง Type กลางและ Interface
-│   │   └── index.ts            # กำหนดลักษณะ Payload งานที่มี (deptId, botDestination)
-│   ├── config/                 # จุดรวมสัญญารหัสผ่านและโทเค็น
-│   │   ├── environments.ts     # แมตช์ตาราง 4 LINE OA Destinations & System Tokens
-│   │   └── redis.ts
-│   ├── middleware/             # ป้อมปราการคัดกรองสาร
-│   │   ├── lineSignature.ts    # ตรวจสอบความถูกต้องของข้อมูลจากเซิร์ฟเวอร์ LINE
-│   │   └── deduplicate.ts      # บล็อกคำขอซ้ำซ้อนจากพนักงานหน้าร้านผ่านระบบผูกล็อกชั่วคราว
-│   ├── controllers/            # ประตูหน้าด่านรับข้อความ
-│   │   └── webhookController.ts # แยกแผนกตาม Destination และดักระบบ Mention กลุ่ม
-│   ├── queues/                 # ระบบกระจายตารางงานเบื้องหลัง
-│   │   ├── messageQueue.ts     # จุดรับและประกอบร่างวัตถุเข้าสู่ท่อคิว
-│   │   └── messageWorker.ts    # ตัวดึงงานไปประมวลผล (มีระบบแยก Prompt และ Tool Filtering ตามแผนก)
-│   ├── services/               # โมดูลผู้ให้บริการเฉพาะด้าน
-│   │   ├── lineService.ts      # เลือกคีย์ยิงคำตอบกลับ (Push Message) ตามแผนกที่ส่งเข้ามา
-│   │   ├── mcpClientPool.ts    # ยึดท่อเชื่อมต่อตรงเข้ากับระบบหลังบ้าน ERP ไว้อย่างเสถียร
-│   │   ├── tokenPruner.ts      # จัดทำความสะอาดข้อมูลดิบ ลดปริมาณขนาดบริบทวงสนทนา
-│   │   └── memoryService.ts    # บริหารจัดการแยกห้องความจำใน Redis: session:dept:{id}:group:{id}...
-│   ├── ai/                     # ส่วนสมองหลักกลยุทธ์ AI
-│   │   ├── aiFactory.ts        # มอบความยืดหยุ่นให้ผู้พัฒนากระโดดข้ามค่ายปัญญาประดิษฐ์
-│   │   ├── baseAdapter.ts
-│   │   └── adapters/
-│   │       ├── openaiAdapter.ts
-│   │       └── claudeAdapter.ts
-│   ├── utils/                  # อุปกรณ์เสริมความอึดของระบบ
-│   │   └── circuitBreaker.ts   # ตัดวงจรปิดรับงานและตอบแจ้งเตือนทันทีเมื่อ ERP หรือ AI ล่ม
-│   └── server.ts               # จุดเริ่มต้นเปิดเครื่อง Fastify Engine
-├── docker-compose.yml          # โครงสร้างจำลองสภาพแวดล้อมใช้งานในเครื่อง
-├── Dockerfile                  # แผนผังการแพ็ค Container คุณภาพสูงสำหรับ Production Deployment
-├── package.json
-└── tsconfig.json
-%%MAGIT_PARSER_PROTECT%%```
-````
+### 4.5 Domain-Specific Wording Without Hardcoding
+
+User asks:
+
+```text
+<brand or local nickname>
+```
+
+System behavior:
+
+1. Use recent session context to infer whether the user is still asking stock, price, or search.
+2. Use tenant Business Profile aliases and examples to normalize wording.
+3. If deterministic config cannot parse the message, optional LLM parser may emit structured JSON with `intent`, `keyword`, `aliases`, `constraints`, and `confidence`.
+4. Search SML with normalized terms and aliases.
+5. If SML returns no or many candidates, ask the user to clarify. Do not fabricate a matching product.
+
+## 5. Architecture
+
+```text
+Telegram Webhook     LINE Webhook
+       |                  |
+       +-------> Fastify Webhook Service
+                         |
+                  Channel Adapters
+        verify -> dedup -> normalize -> group gate
+                         |
+                    Query Router
+                         |
+             Business Profile + Session Context
+                         |
+               Query Understanding Layer
+        deterministic config parser / alias index
+                    |                         |
+              clear intent                ambiguous
+                    |                         |
+                    |                 Optional LLM Parser
+                    |                         |
+                    +-------> Lookup Orchestrator
+                                  |
+                            Redis Cache
+                           hit / miss
+                                  |
+                             SML MCP Client
+                                  |
+          search_product -> get_stock_balance + get_product_price
+                                  |
+                           Response Formatter
+                                  |
+                         Telegram / LINE Reply
+                                  |
+                              Audit Log
+```
+
+## 6. Hot Path Contract
+
+The default lookup path must not enqueue jobs and must not call LLM.
+
+Hot path:
+
+```text
+webhook -> verify -> normalize -> load business profile -> deterministic parse -> cache/SML -> reply
+```
+
+Use BullMQ only when a task is intentionally slow or asynchronous:
+
+- SML timeout retry after the user already received a fallback.
+- Product alias/index refresh from tenant catalog or external profile source.
+- Cache warming.
+- Audit export.
+- Optional LLM parsing that may exceed chat response budget.
+
+## 6.1 Business Profile Contract
+
+Business Profile is tenant-specific data loaded from env/config, database, or a profile service. It is not hardcoded in TypeScript source.
+
+Minimum shape:
+
+```json
+{
+  "tenantId": "customer-a",
+  "businessType": "retail",
+  "locale": "th-TH",
+  "enabledIntents": ["search_product", "stock", "price", "stock_price"],
+  "intentPhrases": {
+    "stock": ["มีไหม", "เหลือไหม"],
+    "price": ["ราคา", "เท่าไร"],
+    "search_product": ["หา", "ค้นหา"]
+  },
+  "examples": [
+    { "text": "<domain example>", "intent": "stock", "keyword": "<normalized keyword>" }
+  ],
+  "aliases": [
+    { "from": "<local nickname>", "to": ["<catalog term>", "<brand term>"] }
+  ],
+  "sml": {
+    "datasetLabel": "customer-a",
+    "tenantStatus": "demo"
+  }
+}
+```
+
+Rules:
+
+- Source code may define generic intent schemas and safety constraints only.
+- Product names, brands, local nicknames, and business-specific examples belong in Business Profile or an alias/catalog index.
+- LLM prompts must be generated from the profile and must return schema-validated JSON only.
+- If the profile is missing or invalid, production startup must fail fast or disable the affected tenant.
+
+## 7. SML MCP Read-Only Contract
+
+Use SML HTTP `/call` first because it is simpler and easier to debug than full MCP JSON-RPC for this service.
+
+Read-only tools for MVP:
+
+- `search_product`
+- `get_stock_balance`
+- `get_product_price`
+
+Out of scope:
+
+- `create_sale_reserve`
+- analytics tools
+- customer account outstanding
+- supplier/purchase tools
+- any tool that creates, updates, reserves, or mutates ERP data
+
+The SML response shape wraps JSON in `content[0].text`; the client must parse it as JSON and validate the parsed payload with schemas before use.
+
+## 8. Latency Budget
+
+Targets are measured from webhook receipt to reply send attempt.
+
+| Path | Target |
+| --- | ---: |
+| Health endpoint | p95 < 50ms |
+| Telegram exact code with cache | p95 < 300ms |
+| Exact code with SML call | p95 < 1.0s |
+| Keyword search + stock + price | p95 < 1.5s |
+| Ambiguous query with LLM parser | p95 < 3.0s |
+| SML timeout fallback | reply within 3.0s |
+
+Implementation choices:
+
+- Parallelize stock and price calls after the product is resolved.
+- Use short TTL cache for stock/price.
+- Use longer TTL cache for product search and aliases.
+- Set hard timeouts on all outbound SML, Telegram, LINE, Redis, and LLM calls.
+
+## 9. Cache Strategy
+
+Redis keys are implementation contracts, not user-visible API.
+
+| Data | Example key | TTL | Notes |
+| --- | --- | ---: | --- |
+| Webhook dedup | `dedup:{channel}:{eventId}` | 5-15m | Prevent duplicate replies. |
+| Product search | `sml:search:{normalizedKeyword}` | 5-30m | Safe to cache longer than stock. |
+| Tenant profile | `profile:{tenantId}` | 5-30m | Config/profile cache; invalidate on profile update. |
+| Alias/search index | `alias:{tenantId}:{normalizedKeyword}` | 5-60m | Optional expansion from profile/catalog, not hardcoded code. |
+| LLM parse result | `llm:parse:{tenantId}:{messageHash}` | 5-30m | Optional structured parse cache; never cache final stock/price facts. |
+| Product price | `sml:price:{productCode}` | 1-10m | Tune with SML/business rules. |
+| Stock balance | `sml:stock:{productCode}` | 15-60s | Keep short to avoid stale stock. |
+| Last query context | `session:{channel}:{chatId}:{userId}:lastProduct` | 15-60m | Used for follow-up questions. |
+| Rate limit | `rl:{channel}:{chatId}:{userId}` | 1m | Protect SML and bot. |
+
+Replies that use cached stock should include a short freshness indicator when helpful.
+
+## 10. User Error Handling
+
+The bot must prefer clarification over guessing.
+
+Required states:
+
+- No product found: ask for product code, model, brand, or clearer keyword.
+- Multiple products found: show top 3-5 choices with product codes and units.
+- Missing intent: show short examples from that tenant's Business Profile.
+- Unsupported message type: ignore or give a concise supported-format reply depending on channel.
+- SML timeout: say the stock/price system is slow and ask the user to retry.
+- SML unavailable: fail closed; do not invent stock or price.
+- Group without mention/command: ignore silently.
+
+## 11. Security And Safety
+
+- Verify Telegram secret token or webhook path secret.
+- Verify LINE signature using the raw request body.
+- Store all channel tokens and SML endpoint config in environment/secret manager only.
+- Redact tokens, phone numbers, and raw sensitive SML payloads from logs.
+- Do not pass raw chat messages directly into SML tools without structured parsing.
+- Do not allow arbitrary tool names from the LLM or user text.
+- Do not hardcode business-specific product keywords, brand aliases, or tenant examples in source code.
+- Validate LLM parse output with a strict JSON schema and confidence threshold.
+- Maintain an explicit allowlist of SML tools.
+- Use least-privileged `mcp-access-mode`; confirm whether `general` can call all three read-only tools, otherwise use `sales`.
+- Do not expose internal SML errors verbatim to users.
+
+## 12. Observability
+
+Every request should have a correlation ID that follows:
+
+```text
+webhook request -> normalized message -> cache lookup -> SML calls -> reply attempt -> audit event
+```
+
+Log fields:
+
+- `requestId`
+- `channel`
+- `chatType`
+- `chatIdHash`
+- `userIdHash`
+- `messageId`
+- `intent`
+- `tenantId`
+- `businessType`
+- `productKeyword`
+- `parserSource`
+- `parserConfidence`
+- `productCode`
+- `cacheHit`
+- `smlTool`
+- `smlLatencyMs`
+- `replyLatencyMs`
+- `outcome`
+- `errorCode`
+
+Metrics:
+
+- webhook request count by channel
+- ignored group message count
+- parser outcome count
+- parser source count: deterministic, context, alias, LLM
+- LLM parse latency, timeout, low-confidence count when enabled
+- cache hit ratio
+- SML latency and error rate by tool
+- reply latency and error rate by channel
+- dedup/rate-limit count
+- no-match and multi-match rate
+
+## 13. Tech Stack
+
+MVP:
+
+- Node.js LTS
+- TypeScript
+- Fastify
+- Telegram: direct Bot API adapter for MVP; grammY or Telegraf optional later
+- LINE: official LINE Bot SDK
+- Redis
+- BullMQ for slow/background jobs
+- Zod for payload/tool response schemas
+- Pino for structured logs
+- OpenTelemetry for traces and metrics
+
+Optional after MVP:
+
+- Langfuse for LLM observability and prompt traces
+- promptfoo for prompt/eval regression tests
+- MarkItDown for manual/document ingestion if product manuals become part of the scope
+- MCP TypeScript SDK if the service later needs full MCP client/server protocol behavior
+
+## 14. Release Gates
+
+Before production pilot:
+
+- Unit tests pass.
+- Build passes.
+- Telegram webhook smoke passes.
+- SML health/read-only smoke passes.
+- LINE signature test passes before LINE rollout.
+- No write SML tool is configured in the allowlist.
+- Redis unavailable test returns safe fallback.
+- SML timeout test returns safe fallback under 3 seconds.
+- Duplicate webhook test sends at most one reply.
+- Group no-mention test sends no reply.
+- Multiple-match test asks the user to choose.
+
+## 15. Open Decisions
+
+- SML MCP base URL is currently `http://192.168.2.248:3515`; confirm whether this points to the correct production/sandbox tenant for the target customer.
+- Confirm which `mcp-access-mode` is least privileged for `search_product`, `get_stock_balance`, and `get_product_price`.
+- Confirm why common target-tenant terms returned no products during smoke testing before treating search quality as production-ready.
+- Confirm acceptable stock cache TTL from business users.
+- Confirm whether price can be cached and for how long.
+- Decide the first Business Profile storage source: env file, JSON config, database table, or profile service.
+- Decide how tenant profile updates are validated and rolled back.
+- Decide whether product alias search requires local indexing after testing SML search quality.
+
+## 16. Suggested Implementation Order
+
+1. Build TypeScript/Fastify skeleton with `/health`.
+2. Implement config validation and secret placeholders.
+3. Implement SML client with schemas and read-only allowlist.
+4. Add Business Profile schema, validation, and tenant-safe defaults.
+5. Move deterministic intent phrases/examples out of source and into Business Profile.
+6. Implement Telegram private chat lookup.
+7. Add Redis cache/dedup/rate limit.
+8. Add Telegram group mention/command gate.
+9. Add LINE webhook signature and group mention support.
+10. Add optional session context for follow-up questions.
+11. Add optional alias/index expansion from Business Profile or catalog source.
+12. Add optional LLM parser only for ambiguous query tests.
+13. Add BullMQ background jobs only where real slow-path need exists.

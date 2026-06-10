@@ -2,33 +2,147 @@
 
 ## System Overview
 
-- Product boundary: central chatbot runtime that receives messages from 4 department-specific LINE OAs, classifies department/context, and safely answers through LLM + MCP tools.
-- Main components: Fastify webhook service, LINE signature/dedup middleware, mention classifier, BullMQ queue, AI/MCP worker pool, provider-swappable LLM adapters, department memory service.
-- External systems: LINE Messaging API, OpenAI/Claude or compatible LLM providers, internal ERP MCP server, Cloudflare/ALB.
-- Data stores: Redis for idempotency locks, BullMQ jobs, session memory, and semantic/vector cache; ERP data remains behind MCP/read replica.
+- Product boundary: read-only chat interface for staff to retrieve product stock and price from SML across multiple business domains.
+- Main components: Fastify lookup service, Telegram polling/webhook adapter, LINE adapter, normalized message router, tenant Business Profile, query understanding layer, lookup orchestrator, Redis cache/session/dedup, SML MCP client, response formatter, audit logger.
+- External systems: Telegram Bot API, LINE Messaging API, SML MCP HTTP server, Redis, optional LLM provider.
+- Data stores: Redis for idempotency locks, rate limits, short-lived lookup cache, and last-product session context.
+- Queue: BullMQ is reserved for slow/background work; it is not part of the default fast lookup path.
 
 ## Component Map
 
-| Component | Responsibility | Key files |
+| Component | Responsibility | Planned files |
 | --- | --- | --- |
-| Webhook backend | Validate LINE requests, map destination to department, filter group @mentions, enqueue jobs fast. | planned `src/server.ts`, `src/controllers/webhookController.ts`, `src/middleware/*` |
-| Worker/jobs | Process queued messages, build department-scoped prompts, call LLM, call allowed MCP tools, reply through LINE. | planned `src/queues/messageWorker.ts`, `src/ai/*`, `src/services/*` |
-| Policy/RBAC | Enforce department tool allowlists and block cross-department data access. | planned `src/config/departments.ts`, `src/services/toolPolicy.ts` |
-| Database/cache | Store dedup locks, queue state, session memory, and cache. | planned Redis/BullMQ config |
-| Frontend | Not in MVP unless an admin/ops console is added later. | none |
+| Server | Start Fastify, register routes, health/readiness, optional Telegram polling, graceful shutdown. | `src/server.ts`, `src/app.ts` |
+| Telegram adapter | Poll or receive Telegram updates, verify webhook secret when enabled, normalize updates, enforce group mention/command rules, apply short follow-up context, send replies. | `src/channels/telegramAdapter.ts`, `src/channels/telegramPollingWorker.ts` |
+| LINE adapter | Verify LINE signature from raw body, normalize events, enforce mention/prefix rules, apply short follow-up context, send replies. | `src/channels/lineAdapter.ts` |
+| Business Profile | Tenant-specific enabled intents, intent phrases, examples, aliases, locale, data-source labels, and reply style. Must be data/config, not hardcoded source. | `src/config/businessProfile.ts`, `profiles/*.json` |
+| Query understanding | Classify stock/price/search intent and extract product keyword/code using context, Business Profile, alias/index expansion, and optional LLM when needed. | `src/core/queryParser.ts`, planned `src/core/queryUnderstanding.ts` |
+| Lookup orchestrator | Resolve product, call cache/SML, parallelize stock and price, choose fallback behavior. | `src/core/lookupOrchestrator.ts` |
+| SML client | Call `/call`, enforce read-only tool allowlist, parse `content[0].text`, validate schemas. | `src/integrations/smlClient.ts` |
+| Cache/session | Redis cache, dedup, rate limit, readiness, multiple-match candidates, and last-product context. | `src/services/cacheService.ts`, `src/services/redisStateService.ts` |
+| Audit/logging/metrics | Structured lookup logs, hashed chat/user IDs, Prometheus-style counters/histograms without secrets or raw sensitive payloads. | `src/core/lookupTelemetry.ts`, `src/observability/*` |
+| Slow jobs | Background retries, cache warming, alias/index refresh, optional LLM parsing. | `src/queues/*` |
 
-## Data Flow
+## Runtime Boundary
 
-1. Input: LINE sends HTTPS webhook events from one of 4 department OAs.
-2. Processing: Fastify verifies signature, deduplicates event/message ID, resolves department from bot destination, and checks group @mention rules.
-3. Storage: webhook stores only queue/session metadata needed for async processing; secrets stay in local/deploy secret sources.
-4. Output: worker calls LLM and allowed MCP tools, then replies/pushes through the correct LINE channel token.
-5. Audit/observability: log request ID, LINE destination, department, user/group/session key, allowed/blocked tool calls, worker latency, and external failure status without logging secrets or sensitive payloads.
+The bot service owns:
+
+- chat channel validation and response delivery
+- message normalization
+- tenant Business Profile loading and validation
+- domain-neutral query understanding
+- cache and session behavior
+- SML read-only tool allowlist
+- user-facing fallback text
+- audit and metrics
+
+SML owns:
+
+- product master data
+- stock balance truth
+- price truth
+- SML-side role enforcement
+- ERP/business calculations
+
+## Default Data Flow
+
+1. Input: Telegram polling fetches updates, or Telegram/LINE sends a webhook event.
+2. Verification: webhook adapters validate provider secret/signature when webhook mode is enabled.
+3. Dedup: Redis prevents duplicate replies for the same event/message.
+4. Group gate: groups require mention, reply-to-bot, command, or configured prefix.
+5. Context: Telegram/LINE can map `1`, a bare product code, or intent-only follow-up to the previous short-lived Redis context.
+6. Profile: resolve the tenant Business Profile from channel/config.
+7. Normalize: channel-specific payload becomes a common message model.
+8. Understand: query understanding extracts intent and product keyword/code from context, Business Profile, aliases, deterministic rules, or optional LLM.
+9. Lookup: orchestrator checks Redis cache, then calls SML read-only tools on cache miss.
+10. Format: formatter builds a concise reply with product code/name/unit/stock/price/freshness.
+11. Reply: adapter sends to the originating chat.
+12. Audit: logs outcome, latency, parser source, cache status, and SML tool usage.
+
+See `data-flow.md` for sequence-level flows.
+
+## Fast Path
+
+Fast path must not use LLM or BullMQ.
+
+```text
+poll/webhook -> verify/gate -> normalize -> business profile -> deterministic parse -> cache/SML -> reply
+```
+
+Use it for:
+
+- exact product code
+- barcode-like input
+- clear stock/price questions from configured tenant phrases
+- cached recent product search
+- numeric selection from recent multiple-match context
+
+## Slow Path
+
+Slow path may use BullMQ or optional LLM parsing.
+
+Use it for:
+
+- ambiguous follow-up questions that do not match short deterministic context
+- SML timeout retry after fallback
+- cache warming
+- product alias/index refresh from tenant profile or catalog data
+- non-urgent observability export
+- optional LLM parse for ambiguous language that cannot be resolved by context/config
+
+## Business Profile Contract
+
+Business Profile is the platform boundary that keeps the bot domain-neutral.
+
+It should contain:
+
+- `tenantId`, `businessType`, `locale`
+- enabled intents such as `search_product`, `stock`, `price`, `stock_price`
+- intent phrase sets and user-facing examples
+- alias rules or links to a catalog-derived alias/index
+- SML dataset/tenant labels and readiness status
+- reply examples/style for help text and clarification
+
+Rules:
+
+- Product names, brands, local nicknames, and business examples must not be hardcoded in source.
+- Source code may define generic intent schemas, parser contracts, and safety rules.
+- LLM prompts must be generated from Business Profile data and must return schema-validated JSON.
+- The lookup orchestrator only receives structured queries; it does not parse raw chat text directly.
 
 ## Failure Boundaries
 
-- Retryable failures: Redis transient errors, LLM 429/5xx, MCP 5xx/timeouts, LINE push transient failures.
-- Non-retryable failures: invalid LINE signature, unknown destination, blocked tool by department policy, malformed message payload.
-- Partial success: LLM succeeds but MCP fails, MCP succeeds but LINE reply fails, or some tool calls are blocked while others are allowed.
-- Idempotency key: LINE event/message ID plus department destination; Redis atomic lock prevents duplicate processing.
-- Rollback path: disable worker consumers, drain/park queues, revert latest deploy image, and keep webhook fast-ack behavior available.
+| Failure | Behavior |
+| --- | --- |
+| Invalid Telegram/LINE verification | Reject; do not process or reply. |
+| Duplicate event | Acknowledge/ignore; do not send duplicate reply. |
+| Group message without gate | Ignore silently. |
+| Parser cannot find intent | Reply with tenant-specific examples in private chat; ignore or concise help in group. |
+| No product found | Ask for product code, model, brand, or clearer keyword. |
+| Multiple products found | Present top choices and ask the user to choose. |
+| SML timeout/unavailable | Fail closed with safe fallback; never invent stock/price. |
+| SML malformed response | Log schema error, return safe fallback. |
+| Redis unavailable | Continue with direct SML for low traffic if safe; disable cache-dependent follow-up context; alert. |
+| Channel reply failure | Log and expose metric; do not retry indefinitely in request path. |
+| Unauthenticated internal endpoint | Return `401`; `/health` remains public. |
+
+## Performance Principles
+
+- Exact code path should skip broad search when safe.
+- Stock and price calls should run concurrently after product resolution.
+- Cache product search longer than stock.
+- Keep stock TTL short to reduce stale answers.
+- Enforce timeout budgets at the SML client boundary.
+- Use circuit breaker around SML to avoid piling traffic onto a failing dependency.
+- Rate-limit by channel/chat/user to protect SML and channel APIs.
+
+## Security Principles
+
+- No write SML tools in MVP allowlist.
+- No direct database or generic SQL MCP access.
+- No arbitrary tool execution from user text or LLM output.
+- Raw chat text can suggest a query, but structured parser/tool schemas decide what is called.
+- No hardcoded business-specific vocabulary, product names, or brand aliases in source code.
+- Business Profile changes must be validated and rollbackable like config changes.
+- Redact secrets and sensitive identifiers in logs.
+- Use hashed chat/user IDs in analytics logs unless operational debugging requires controlled access to raw IDs.

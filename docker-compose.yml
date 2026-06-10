@@ -1,0 +1,93 @@
+name: parts-lookup
+
+services:
+  parts-lookup-redis:
+    image: redis:7-alpine
+    container_name: parts-lookup-redis
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    volumes:
+      - parts-lookup-redis-data:/data
+    networks:
+      - parts-lookup-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  parts-lookup-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: parts-lookup-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      GIT_SHA: ${GIT_SHA:-}
+      PORT: ${PORT:-3060}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      BUSINESS_PROFILE_PATH: ${BUSINESS_PROFILE_PATH:-profiles/construction-demo.json}
+      REDIS_URL: redis://parts-lookup-redis:6379
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-20}
+      ALERTS_ENABLED: ${ALERTS_ENABLED:-false}
+      ALERT_TELEGRAM_BOT_TOKEN: ${ALERT_TELEGRAM_BOT_TOKEN:-}
+      OPS_TELEGRAM_CHAT_ID: ${OPS_TELEGRAM_CHAT_ID:-}
+      ALERT_DEDUP_TTL_SECONDS: ${ALERT_DEDUP_TTL_SECONDS:-300}
+      TELEGRAM_DEDUP_TTL_SECONDS: ${TELEGRAM_DEDUP_TTL_SECONDS:-900}
+      SML_MCP_BASE_URL: ${SML_MCP_BASE_URL:-http://192.168.2.248:3515}
+      SML_MCP_ACCESS_MODE: ${SML_MCP_ACCESS_MODE:-sales}
+      SML_REQUEST_TIMEOUT_MS: ${SML_REQUEST_TIMEOUT_MS:-1500}
+      SML_DATASET_LABEL: ${SML_DATASET_LABEL:-construction-demo}
+      SML_TENANT_STATUS: ${SML_TENANT_STATUS:-demo}
+      SML_CIRCUIT_FAILURE_THRESHOLD: ${SML_CIRCUIT_FAILURE_THRESHOLD:-5}
+      SML_CIRCUIT_OPEN_SECONDS: ${SML_CIRCUIT_OPEN_SECONDS:-60}
+      SML_MAX_CONCURRENT_CALLS: ${SML_MAX_CONCURRENT_CALLS:-10}
+      PRODUCT_SEARCH_CACHE_TTL_SECONDS: ${PRODUCT_SEARCH_CACHE_TTL_SECONDS:-300}
+      STOCK_CACHE_TTL_SECONDS: ${STOCK_CACHE_TTL_SECONDS:-30}
+      PRICE_CACHE_TTL_SECONDS: ${PRICE_CACHE_TTL_SECONDS:-300}
+      LOOKUP_TEST_ENDPOINT_ENABLED: ${LOOKUP_TEST_ENDPOINT_ENABLED:-true}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      LINE_ENABLED: ${LINE_ENABLED:-false}
+      LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+      LINE_GROUP_PREFIXES: "${LINE_GROUP_PREFIXES:-/,!}"
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_POLLING_ENABLED: ${TELEGRAM_POLLING_ENABLED:-false}
+      TELEGRAM_WEBHOOK_ENABLED: ${TELEGRAM_WEBHOOK_ENABLED:-false}
+      TELEGRAM_CONTEXT_TTL_SECONDS: ${TELEGRAM_CONTEXT_TTL_SECONDS:-300}
+      TELEGRAM_POLLING_INTERVAL_MS: ${TELEGRAM_POLLING_INTERVAL_MS:-1000}
+      TELEGRAM_POLLING_TIMEOUT_SECONDS: ${TELEGRAM_POLLING_TIMEOUT_SECONDS:-25}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+    ports:
+      - "3060:3060"
+    depends_on:
+      parts-lookup-redis:
+        condition: service_healthy
+    networks:
+      - parts-lookup-net
+    restart: unless-stopped
+
+  parts-lookup-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: parts-lookup-tunnel
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    depends_on:
+      - parts-lookup-api
+    networks:
+      - parts-lookup-net
+    profiles:
+      - tunnel
+    restart: unless-stopped
+
+networks:
+  parts-lookup-net:
+    name: parts-lookup-net
+
+volumes:
+  parts-lookup-redis-data:
+    name: parts-lookup-redis-data

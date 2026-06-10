@@ -2,28 +2,18 @@
 
 ## Status
 
-Accepted as starting architecture from the supplied blueprint.
+Superseded by `0002-read-only-parts-lookup-chatbot.md`.
 
 ## Context
 
-The platform must support 4 LINE OAs for sales, purchasing, accounting, and mechanics while keeping context memory, MCP tool access, and LINE credentials isolated per department. LINE webhook requests must be acknowledged quickly, and LLM/ERP work may exceed the webhook timeout window.
+The original supplied blueprint described a platform for 4 LINE OAs for sales, purchasing, accounting, and mechanics while keeping context memory, MCP tool access, and LINE credentials isolated per department. LINE webhook requests would be acknowledged quickly, and LLM/ERP work would run in async workers.
 
-## Options
-
-- One service per department: strongest isolation, but duplicates infrastructure and operational work.
-- One shared service with department policy isolation: cheaper and easier to scale, but requires careful destination mapping, RBAC, and audit logs.
-- One shared bot without department isolation: simplest, but not acceptable for ERP/security boundaries.
-
-## Decision
+## Original Decision
 
 Use one shared Fastify webhook service with department resolution from LINE destination, Redis idempotency locks, BullMQ async jobs, department-scoped prompts, isolated session keys, and MCP tool allowlists enforced before any ERP call.
 
-## Consequences
+## Why Superseded
 
-- Positive: efficient infrastructure, consistent observability, and reusable AI/MCP worker logic.
-- Negative: policy bugs can affect multiple departments, so tests and audit logging are mandatory.
-- Follow-up: implement destination mapping tests, tool-policy tests, webhook signature tests, and duplicate-event tests before connecting production credentials.
+The real first customer use case is narrower and more urgent: auto parts store staff need fast stock and price lookup from LINE groups/private chats, with Telegram added for easier testing. Speed and read-only SML lookup are more important than multi-department agent routing.
 
-## Regret Check
-
-At larger scale, noisy departments may starve others unless queues are partitioned or prioritized by department. Watch queue latency, worker saturation, blocked policy counts, and LLM/ERP error rates from the first MVP.
+The multi-tenant architecture may return later if the product expands, but it is not the MVP baseline.

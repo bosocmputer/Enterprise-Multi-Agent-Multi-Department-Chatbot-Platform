@@ -1,0 +1,53 @@
+{
+  "tenantId": "construction-demo",
+  "businessType": "construction-materials",
+  "locale": "th-TH",
+  "enabledIntents": ["search_product", "stock", "price", "stock_price"],
+  "intentPhrases": {
+    "stock": [
+      "มีไหม",
+      "มีมั้ย",
+      "มีของ",
+      "มีของไหม",
+      "มีของมั้ย",
+      "ของไหม",
+      "ของเหลือไหม",
+      "คงเหลือ",
+      "เหลือ",
+      "สต็อก",
+      "stock",
+      "stocks"
+    ],
+    "price": ["ราคา", "เช็คราคา", "เช็คราคาหน่อย", "กี่บาท", "เท่าไร", "เท่าไหร่", "price"],
+    "search_product": ["หา", "ค้นหา", "search", "find"],
+    "stock_price": ["มีไหม ราคา", "มีมั้ย ราคา", "มีของไหม ราคาเท่าไร"]
+  },
+  "intentPatterns": [
+    {
+      "intent": "stock",
+      "pattern": "^มี(?<keyword>[^\\s]+?)(?:เหลือไหม|เหลือมั้ย|ไหม|มั้ย)$"
+    },
+    {
+      "intent": "stock",
+      "pattern": "^มี\\s+(?<keyword>.+?)\\s*(?:เหลือไหม|เหลือมั้ย|ไหม|มั้ย)$"
+    }
+  ],
+  "fillerPhrases": ["ให้หน่อย", "หน่อย", "ครับ", "ค่ะ", "คะ", "จ้า"],
+  "helpExamples": ["ปูน ราคา", "มีปูนเหลือไหม", "PAINT-01424 มีของไหม", "น้ำมัน มีไหม ราคาเท่าไร"],
+  "examples": [
+    { "text": "มีปูนเหลือไหม", "intent": "stock", "keyword": "ปูน" },
+    { "text": "น้ำมัน ราคา", "intent": "price", "keyword": "น้ำมัน" },
+    { "text": "PAINT-01424 มีของไหม", "intent": "stock", "keyword": "PAINT-01424" }
+  ],
+  "aliases": [
+    { "from": "ปูนตราช้าง", "to": ["ปูน ช้าง"] },
+    { "from": "ปูนตราเสือ", "to": ["ปูน เสือ"] }
+  ],
+  "replyStyle": {
+    "fallbackProductHints": "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น"
+  },
+  "sml": {
+    "datasetLabel": "construction-demo",
+    "tenantStatus": "demo"
+  }
+}

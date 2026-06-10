@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+.env
+.env.*
+!.env.example
+graphify-out
+.git
+.DS_Store
+*.log
+backups
+artifacts
+screenshots
