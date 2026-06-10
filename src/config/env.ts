@@ -21,6 +21,24 @@ const numberFromEnv = (defaultValue: number) =>
       return parsed;
     });
 
+const optionalStringFromEnv = z
+  .string()
+  .optional()
+  .transform((value) => (value == null || value === "" ? undefined : value));
+
+const optionalUrlFromEnv = z
+  .string()
+  .optional()
+  .transform((value) => {
+    if (value == null || value === "") return undefined;
+    try {
+      new URL(value);
+      return value;
+    } catch {
+      throw new Error(`Expected URL env value, got ${value}`);
+    }
+  });
+
 const csvFromEnv = (defaultValue: string[]) =>
   z
     .string()
@@ -76,10 +94,10 @@ const envSchema = z
     LLM_PARSER_MODE: z.enum(["off", "shadow", "assist"]).default("off"),
     LLM_PROVIDER: z.enum(["litellm", "openai"]).default("litellm"),
     LITELLM_BASE_URL: z.url().default("http://192.168.2.248:4000"),
-    LITELLM_API_KEY: z.string().optional(),
+    LITELLM_API_KEY: optionalStringFromEnv,
     LITELLM_MODEL: z.string().default("openrouter/openrouter/free"),
-    OPENAI_API_KEY: z.string().optional(),
-    OPENAI_BASE_URL: z.url().optional(),
+    OPENAI_API_KEY: optionalStringFromEnv,
+    OPENAI_BASE_URL: optionalUrlFromEnv,
     LLM_PARSER_TIMEOUT_MS: numberFromEnv(7000),
     LLM_MIN_CONFIDENCE: numberFromEnv(0.75),
     TELEGRAM_CONTEXT_TTL_SECONDS: numberFromEnv(300),

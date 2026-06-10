@@ -58,10 +58,12 @@ describe("loadConfig alert settings", () => {
     const config = loadConfig({
       LLM_PARSER_MODE: "shadow",
       LLM_PROVIDER: "openai",
-      OPENAI_API_KEY: "openai-compatible-key"
+      OPENAI_API_KEY: "openai-compatible-key",
+      OPENAI_BASE_URL: ""
     });
 
     expect(config.LLM_PROVIDER).toBe("openai");
     expect(config.OPENAI_API_KEY).toBe("openai-compatible-key");
+    expect(config.OPENAI_BASE_URL).toBeUndefined();
   });
 });
