@@ -1,0 +1,45 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+
+# Runtime/build output
+node_modules/
+dist/
+build/
+.next/
+.vite/
+.turbo/
+.cache/
+coverage/
+tmp/
+vendor/
+
+# Graphify local context map
+graphify-out/
+
+# Local data/artifacts
+backups/
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.bak
+*.log
+*.xlsx
+*.xls
+*.csv
+*.pdf
+screenshots/
+artifacts/
+
+# OS/editor
+.DS_Store
+._*
+.vscode/settings.json
+*.swp
