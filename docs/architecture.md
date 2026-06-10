@@ -16,7 +16,7 @@
 | Telegram adapter | Poll or receive Telegram updates, verify webhook secret when enabled, normalize updates, enforce group mention/command rules, apply short follow-up context, send replies. | `src/channels/telegramAdapter.ts`, `src/channels/telegramPollingWorker.ts` |
 | LINE adapter | Verify LINE signature from raw body, normalize events, enforce mention/prefix rules, apply short follow-up context, send replies. | `src/channels/lineAdapter.ts` |
 | Business Profile | Tenant-specific enabled intents, intent phrases, examples, aliases, locale, data-source labels, and reply style. Must be data/config, not hardcoded source. | `src/config/businessProfile.ts`, `profiles/*.json` |
-| Query understanding | Classify stock/price/search intent and extract product keyword/code using context, Business Profile, alias/index expansion, and optional LLM when needed. | `src/core/queryParser.ts`, planned `src/core/queryUnderstanding.ts` |
+| Query understanding | Classify stock/price/search intent and extract product keyword/code using context, Business Profile, alias/index expansion, and optional LLM when needed. | `src/core/queryParser.ts`, `src/core/queryUnderstanding.ts`, `src/core/llmParser.ts` |
 | Lookup orchestrator | Resolve product, call cache/SML, parallelize stock and price, choose fallback behavior. | `src/core/lookupOrchestrator.ts` |
 | SML client | Call `/call`, enforce read-only tool allowlist, parse `content[0].text`, validate schemas. | `src/integrations/smlClient.ts` |
 | Cache/session | Redis cache, dedup, rate limit, readiness, multiple-match candidates, and last-product context. | `src/services/cacheService.ts`, `src/services/redisStateService.ts` |
@@ -88,7 +88,7 @@ Use it for:
 - cache warming
 - product alias/index refresh from tenant profile or catalog data
 - non-urgent observability export
-- optional LLM parse for ambiguous language that cannot be resolved by context/config
+- optional LiteLLM parse for ambiguous language that cannot be resolved by context/config
 
 ## Business Profile Contract
 
@@ -109,6 +109,8 @@ Rules:
 - Source code may define generic intent schemas, parser contracts, and safety rules.
 - LLM prompts must be generated from Business Profile data and must return schema-validated JSON.
 - The lookup orchestrator only receives structured queries; it does not parse raw chat text directly.
+- In `shadow` mode, LLM parser output is logged/measured but does not change the user-facing reply.
+- In `assist` mode, LLM parser output may be used only when deterministic parsing is unsupported and local validation/confidence checks pass.
 
 ## Failure Boundaries
 
@@ -118,6 +120,7 @@ Rules:
 | Duplicate event | Acknowledge/ignore; do not send duplicate reply. |
 | Group message without gate | Ignore silently. |
 | Parser cannot find intent | Reply with tenant-specific examples in private chat; ignore or concise help in group. |
+| LLM parser invalid/timeout | Treat as unsupported or no-match; do not expose provider details to the user. |
 | No product found | Ask for product code, model, brand, or clearer keyword. |
 | Multiple products found | Present top choices and ask the user to choose. |
 | SML timeout/unavailable | Fail closed with safe fallback; never invent stock/price. |

@@ -35,6 +35,16 @@ const config: AppConfig = {
   LINE_CHANNEL_SECRET: undefined,
   LINE_CHANNEL_ACCESS_TOKEN: undefined,
   LINE_GROUP_PREFIXES: ["/", "!"],
+  LLM_PARSER_ENABLED: false,
+  LLM_PARSER_MODE: "off",
+  LLM_PROVIDER: "litellm",
+  LITELLM_BASE_URL: "http://litellm.test",
+  LITELLM_API_KEY: undefined,
+  LITELLM_MODEL: "openrouter/openrouter/free",
+  OPENAI_API_KEY: undefined,
+  OPENAI_BASE_URL: undefined,
+  LLM_PARSER_TIMEOUT_MS: 7000,
+  LLM_MIN_CONFIDENCE: 0.75,
   TELEGRAM_CONTEXT_TTL_SECONDS: 300,
   TELEGRAM_DEDUP_TTL_SECONDS: 900,
   TELEGRAM_ENABLED: false,
@@ -99,6 +109,53 @@ describe("createApp", () => {
       headers: { authorization: "Bearer secret" }
     });
     expect(authed.statusCode).toBe(200);
+
+    await app.close();
+  });
+
+  it("serves internal LLM parse smoke when parser is configured", async () => {
+    const app = createApp(
+      { ...config, NODE_ENV: "production", INTERNAL_API_TOKEN: "secret", LLM_PARSER_MODE: "shadow" },
+      {
+        llmParser: {
+          parse: async () => ({
+            aliases: [],
+            confidence: 0.98,
+            intent: "stock",
+            keyword: "ปูนตราช้าง",
+            searchTerms: ["ปูนตราช้าง"],
+            status: "parsed"
+          })
+        },
+        smlClient: {
+          health: async () => true
+        } as unknown as SmlClient
+      }
+    );
+
+    const missingAuth = await app.inject({
+      method: "POST",
+      url: "/internal/parse",
+      payload: { text: "มีปูนตราช้างเหลือไหม" }
+    });
+    expect(missingAuth.statusCode).toBe(401);
+
+    const parsed = await app.inject({
+      headers: { authorization: "Bearer secret" },
+      method: "POST",
+      payload: { text: "มีปูนตราช้างเหลือไหม" },
+      url: "/internal/parse"
+    });
+
+    expect(parsed.statusCode).toBe(200);
+    expect(parsed.json()).toMatchObject({
+      result: {
+        confidence: 0.98,
+        intent: "stock",
+        keyword: "ปูนตราช้าง",
+        status: "parsed"
+      }
+    });
 
     await app.close();
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadBusinessProfile } from "../config/businessProfile.js";
 import { SmlClient } from "../integrations/smlClient.js";
 import { MemoryCacheService } from "../services/cacheService.js";
+import type { LookupLlmParser } from "./llmParser.js";
 import { LookupOrchestrator } from "./lookupOrchestrator.js";
 
 const profile = loadBusinessProfile("profiles/construction-demo.json");
@@ -99,5 +100,35 @@ describe("LookupOrchestrator", () => {
       status: "no_match",
       keyword: "ปูนตราช้าง"
     });
+  });
+
+  it("does not let shadow LLM output change the user-facing lookup result", async () => {
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      parse: async () => {
+        llmCalls += 1;
+        return {
+          aliases: ["ปูน ช้าง"],
+          confidence: 0.99,
+          intent: "stock",
+          keyword: "ปูนตราช้าง",
+          searchTerms: ["ปูนตราช้าง", "ปูน ช้าง"],
+          status: "parsed"
+        };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => []
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "shadow" }
+    );
+
+    await expect(lookup.lookup({ text: "มีปูนตราช้างเหลือไหม" })).resolves.toMatchObject({
+      status: "no_match",
+      keyword: "ปูนตราช้าง"
+    });
+    expect(llmCalls).toBe(1);
   });
 });

@@ -23,6 +23,8 @@ Expose at least:
 | `cache_hit_ratio{kind}` | Cache effectiveness. |
 | `parts_lookup_sml_tool_duration_ms{tool,outcome}` | SML dependency health. |
 | `parts_lookup_sml_tool_calls_total{tool,outcome}` | SML integration failures and volume. |
+| `parts_lookup_llm_parse_total{mode,outcome}` | LLM parser quality, rejection rate, and shadow/assist activity. |
+| `parts_lookup_llm_parse_duration_ms{model,outcome}` | LLM parser latency and timeout risk. |
 | `reply_errors_total{channel}` | Channel delivery issues. |
 | `dedup_hits_total{channel}` | Duplicate webhook events. |
 | `rate_limited_total{channel}` | Abuse or noisy group behavior. |
@@ -52,6 +54,7 @@ The script reads the alert bot token from `.env`, finds the latest Telegram chat
 | Reply failures | channel reply error rate > 5% for 5 minutes. |
 | Redis unavailable | any sustained Redis connection failure > 1 minute. |
 | No-match spike | no-match rate doubles baseline for 15 minutes. |
+| LLM parser rejected/timeout spike | parser rejection or timeout rate rises after enabling shadow/assist. |
 
 ## Runbook: SML Port Not Reachable
 
@@ -123,6 +126,28 @@ Actions:
 3. Consider local product alias/index cache if SML search cannot handle common terms directly.
 4. Re-test with known item codes and common store phrases from the tenant profile.
 5. Only add optional LLM parser after profile/context/alias parsing is insufficient.
+
+## Runbook: LiteLLM Parser Degraded
+
+Symptoms:
+
+- `/internal/parse` returns `rejected_timeout`, `rejected_provider_error`, or invalid output.
+- `parts_lookup_llm_parse_total{outcome=...}` rejection rate increases.
+- Parser latency is high, but SML lookup remains healthy.
+
+Behavior:
+
+- In `shadow` mode, user replies are unchanged.
+- In `assist` mode, rejected parser output falls back to deterministic unsupported/no-match behavior.
+- Never use LLM content as stock or price truth.
+
+Immediate rollback:
+
+```bash
+cd /home/bosscatdog/parts-lookup-chatbot
+perl -0pi -e 's/^LLM_PARSER_ENABLED=.*/LLM_PARSER_ENABLED=false/m; s/^LLM_PARSER_MODE=.*/LLM_PARSER_MODE=off/m' .env
+docker compose up -d --force-recreate parts-lookup-api
+```
 
 ## Credential Rotation
 

@@ -1,16 +1,27 @@
 import type { BusinessProfile } from "../config/businessProfile.js";
 import { SmlClient, SmlClientError } from "../integrations/smlClient.js";
+import type pino from "pino";
+import type { MetricsRegistry } from "../observability/metrics.js";
 import type { CacheService, DedupStore } from "../services/cacheService.js";
-import { parseLookupQuery } from "./queryParser.js";
+import type { LlmParserMode, LookupLlmParser } from "./llmParser.js";
+import { runLlmParseWithTelemetry } from "./llmParser.js";
+import { understandLookupQuery } from "./queryUnderstanding.js";
 import type { LookupRequest, LookupResult, ProductCandidate } from "./types.js";
 
 export interface LookupOrchestratorOptions {
   businessProfile: BusinessProfile;
   datasetLabel: string;
+  llmParser?: LookupLlmParser;
+  llmParserMode?: LlmParserMode;
   searchCacheTtlSeconds?: number;
   stockCacheTtlSeconds?: number;
   priceCacheTtlSeconds?: number;
   tenantStatus?: "demo" | "real";
+}
+
+export interface LookupTelemetryOptions {
+  logger?: pino.Logger;
+  metrics?: MetricsRegistry;
 }
 
 export class LookupOrchestrator {
@@ -29,15 +40,25 @@ export class LookupOrchestrator {
     this.priceCacheTtlSeconds = options.priceCacheTtlSeconds ?? 300;
     this.datasetLabel = options.datasetLabel;
     this.tenantStatus = options.tenantStatus ?? "demo";
+    this.llmParser = options.llmParser;
+    this.llmParserMode = options.llmParserMode ?? "off";
   }
 
   private readonly businessProfile: BusinessProfile;
   private readonly datasetLabel: string;
+  private readonly llmParser: LookupLlmParser | undefined;
+  private readonly llmParserMode: LlmParserMode;
   private readonly tenantStatus: "demo" | "real";
 
-  async lookup(request: LookupRequest): Promise<LookupResult> {
-    const parsed = parseLookupQuery(request.text, this.businessProfile);
+  async lookup(request: LookupRequest, telemetry: LookupTelemetryOptions = {}): Promise<LookupResult> {
+    const parsed = await understandLookupQuery(request.text, this.businessProfile, {
+      llmParser: this.llmParser,
+      llmParserMode: this.llmParserMode,
+      logger: telemetry.logger,
+      metrics: telemetry.metrics
+    });
     if (parsed.status === "unsupported") {
+      this.triggerShadowParse(request.text, telemetry);
       return { status: "unsupported", reason: parsed.reason };
     }
 
@@ -47,6 +68,7 @@ export class LookupOrchestrator {
         : await this.searchProductsByTerms(parsed.searchTerms);
 
       if (candidates.length === 0) {
+        this.triggerShadowParse(request.text, telemetry);
         return { status: "no_match", intent: parsed.intent, keyword: parsed.keyword };
       }
 
@@ -193,6 +215,17 @@ export class LookupOrchestrator {
     const value = await fetcher();
     await this.cache.set(key, value, ttlSeconds);
     return value;
+  }
+
+  private triggerShadowParse(text: string, telemetry: LookupTelemetryOptions): void {
+    if (this.llmParserMode !== "shadow" || !this.llmParser) return;
+    void runLlmParseWithTelemetry(this.llmParser, text, {
+      logger: telemetry.logger,
+      metrics: telemetry.metrics,
+      mode: "shadow"
+    }).catch((error) => {
+      telemetry.logger?.warn({ error }, "llm shadow parser failed");
+    });
   }
 }
 

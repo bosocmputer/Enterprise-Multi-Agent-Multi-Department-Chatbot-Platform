@@ -4,6 +4,7 @@ import { z } from "zod";
 import { alertOnLookupDependencyError, type AlertSender } from "./channelAlerts.js";
 import { resolveTextWithContext, saveLookupContext } from "./chatContext.js";
 import type { BusinessProfile } from "../config/businessProfile.js";
+import type { LlmParserMode, LookupLlmParser } from "../core/llmParser.js";
 import type { LookupOrchestrator } from "../core/lookupOrchestrator.js";
 import { runLookupWithTelemetry } from "../core/lookupTelemetry.js";
 import { formatLookupReply } from "../core/responseFormatter.js";
@@ -67,6 +68,8 @@ export interface LineAdapterOptions {
   fetchImpl?: typeof fetch;
   groupPrefixes: string[];
   logger?: pino.Logger;
+  llmParser?: LookupLlmParser;
+  llmParserMode?: LlmParserMode;
   metrics?: MetricsRegistry;
   rateLimiter?: RateLimiter;
   rateLimitPerMinute?: number;

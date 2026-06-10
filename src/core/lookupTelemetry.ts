@@ -13,7 +13,7 @@ export async function runLookupWithTelemetry(
   } = {}
 ): Promise<LookupResult> {
   const startedAt = Date.now();
-  const result = await lookup.lookup(request);
+  const result = await lookup.lookup(request, options);
   const durationMs = Date.now() - startedAt;
   const channel = request.channel ?? "internal";
 

@@ -29,4 +29,39 @@ describe("loadConfig alert settings", () => {
       })
     ).toThrow(/TELEGRAM_BOT_TOKEN is required when Telegram is enabled/);
   });
+
+  it("derives shadow mode from the simple LLM parser enabled flag", () => {
+    const config = loadConfig({
+      LLM_PARSER_ENABLED: "true",
+      LLM_PARSER_MODE: "off",
+      LITELLM_API_KEY: "llm-key"
+    });
+
+    expect(config.LLM_PARSER_MODE).toBe("shadow");
+  });
+
+  it("keeps explicit assist mode when the simple LLM parser flag is enabled", () => {
+    const config = loadConfig({
+      LLM_PARSER_ENABLED: "true",
+      LLM_PARSER_MODE: "assist",
+      LITELLM_API_KEY: "llm-key"
+    });
+
+    expect(config.LLM_PARSER_MODE).toBe("assist");
+  });
+
+  it("fails fast when LLM parser is enabled without a key", () => {
+    expect(() => loadConfig({ LLM_PARSER_MODE: "shadow" })).toThrow(/LITELLM_API_KEY or OPENAI_API_KEY/);
+  });
+
+  it("accepts OPENAI_API_KEY as an OpenAI-compatible LiteLLM key fallback", () => {
+    const config = loadConfig({
+      LLM_PARSER_MODE: "shadow",
+      LLM_PROVIDER: "openai",
+      OPENAI_API_KEY: "openai-compatible-key"
+    });
+
+    expect(config.LLM_PROVIDER).toBe("openai");
+    expect(config.OPENAI_API_KEY).toBe("openai-compatible-key");
+  });
 });

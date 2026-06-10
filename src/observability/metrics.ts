@@ -88,6 +88,15 @@ export class MetricsRegistry {
     this.histogram("parts_lookup_sml_tool_duration_ms", "SML MCP tool duration in milliseconds.", durationMs, labels);
   }
 
+  recordLlmParse(mode: string, model: string, outcome: string, durationMs: number): void {
+    const labels = { mode, outcome };
+    this.counter("parts_lookup_llm_parse_total", "LLM parser attempts by mode and outcome.", labels);
+    this.histogram("parts_lookup_llm_parse_duration_ms", "LLM parser duration in milliseconds.", durationMs, {
+      model,
+      outcome
+    });
+  }
+
   renderPrometheus(): string {
     const lines: string[] = [];
     for (const [name, metric] of [...this.metrics.entries()].sort(([a], [b]) => a.localeCompare(b))) {

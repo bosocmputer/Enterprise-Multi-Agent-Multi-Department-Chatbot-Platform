@@ -16,11 +16,12 @@ Last updated: 2026-06-10
 - Server/deploy path: `/home/bosscatdog/parts-lookup-chatbot`
 - Pilot URL: `http://192.168.2.109:3060`
 - Local service port: `3060` by default.
-- Implemented app services: Fastify lookup service, SML read-only client, deterministic parser, response formatter, Redis-backed cache/dedup/rate limit/context state, Telegram polling worker, LINE webhook adapter, optional Telegram webhook route behind env flags, Prometheus-style `/metrics`, Telegram ops alerts.
+- Implemented app services: Fastify lookup service, SML read-only client, deterministic parser, optional LiteLLM slow-path parser, response formatter, Redis-backed cache/dedup/rate limit/context state, Telegram polling worker, LINE webhook adapter, optional Telegram webhook route behind env flags, Prometheus-style `/metrics`, Telegram ops alerts.
 - Deploy services: `parts-lookup-api` and dedicated `parts-lookup-redis` in Docker Compose project/network/volume names prefixed with `parts-lookup`.
 - Implemented profile services: Business Profile v1 schema/file loader with `profiles/construction-demo.json` for the SML construction-materials demo at `192.168.2.248:3515`.
-- Deferred app services: database/profile-service backed Business Profile store, full domain-agnostic query understanding layer, optional LLM parser, optional BullMQ worker, external metrics collector, real customer SML tenant cutover.
+- Deferred app services: database/profile-service backed Business Profile store, broader LLM assist rollout beyond shadow mode, optional BullMQ worker, external metrics collector, real customer SML tenant cutover.
 - External dependency: SML MCP server confirmed at `http://192.168.2.248:3515`.
+- Optional LLM dependency: LiteLLM Swagger/API confirmed at `http://192.168.2.248:4000`; model list currently exposes `openrouter/openrouter/free`.
 
 ## SML Connectivity Check
 
@@ -43,12 +44,12 @@ Last checked from this workstation and deploy server `192.168.2.109`:
 - Goal: build a read-only chatbot where staff can ask stock and price questions in Telegram and LINE without hardcoding business-specific vocabulary in source code.
 - In progress: Telegram real-bot pilot is enabled; LINE code is ready but disabled until credentials and dedicated tunnel are configured.
 - Blocked: correct tenant/product data for the auto parts store must be confirmed before relying on real customer answers.
-- Next safest implementation step: harden Query Understanding around Business Profile aliases/context, then add optional LLM parser behind a feature flag.
+- Next safest implementation step: run LiteLLM parser in shadow mode on real no-match/unsupported traffic, review metrics/logged hashes, then decide whether to enable assist mode.
 
 ## Known Gaps
 
 - Application code: pilot runtime exists under `src/`.
-- Testing: latest local run passed `35` Vitest tests and `npm run build`.
+- Testing: latest local run passed `54` Vitest tests and `npm run build`.
 - Server smoke: latest app deploy passed `GET /health`, unauthenticated internal endpoint rejection, authenticated `/metrics`, Redis readiness, and safe SML fallback; authenticated `/ready` is currently degraded because SML MCP is unavailable.
 - Telegram pilot bot username: `employee_assistant_248_bot`.
 - SML: least-privileged role, correct tenant/product dataset, timeout behavior, and search quality need verification.

@@ -72,6 +72,16 @@ const envSchema = z
     LINE_CHANNEL_SECRET: z.string().optional(),
     LINE_CHANNEL_ACCESS_TOKEN: z.string().optional(),
     LINE_GROUP_PREFIXES: csvFromEnv(["/", "!"]),
+    LLM_PARSER_ENABLED: booleanFromEnv,
+    LLM_PARSER_MODE: z.enum(["off", "shadow", "assist"]).default("off"),
+    LLM_PROVIDER: z.enum(["litellm", "openai"]).default("litellm"),
+    LITELLM_BASE_URL: z.url().default("http://192.168.2.248:4000"),
+    LITELLM_API_KEY: z.string().optional(),
+    LITELLM_MODEL: z.string().default("openrouter/openrouter/free"),
+    OPENAI_API_KEY: z.string().optional(),
+    OPENAI_BASE_URL: z.url().optional(),
+    LLM_PARSER_TIMEOUT_MS: numberFromEnv(7000),
+    LLM_MIN_CONFIDENCE: numberFromEnv(0.75),
     TELEGRAM_CONTEXT_TTL_SECONDS: numberFromEnv(300),
     TELEGRAM_DEDUP_TTL_SECONDS: numberFromEnv(900),
     TELEGRAM_ENABLED: booleanFromEnv,
@@ -126,6 +136,29 @@ const envSchema = z
         message: "TELEGRAM_WEBHOOK_SECRET is required when TELEGRAM_WEBHOOK_ENABLED=true"
       });
     }
+    const llmEnabled = env.LLM_PARSER_ENABLED || env.LLM_PARSER_MODE !== "off";
+    const llmApiKey = env.LITELLM_API_KEY ?? env.OPENAI_API_KEY;
+    if (llmEnabled && !llmApiKey) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["LITELLM_API_KEY"],
+        message: "LITELLM_API_KEY or OPENAI_API_KEY is required when LLM parser is enabled"
+      });
+    }
+    if (env.LLM_MIN_CONFIDENCE < 0 || env.LLM_MIN_CONFIDENCE > 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["LLM_MIN_CONFIDENCE"],
+        message: "LLM_MIN_CONFIDENCE must be between 0 and 1"
+      });
+    }
+    if (env.LLM_PARSER_TIMEOUT_MS <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["LLM_PARSER_TIMEOUT_MS"],
+        message: "LLM_PARSER_TIMEOUT_MS must be greater than 0"
+      });
+    }
   });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -138,5 +171,9 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       .join("; ");
     throw new Error(`Invalid environment configuration: ${message}`);
   }
-  return parsed.data;
+  return {
+    ...parsed.data,
+    LLM_PARSER_MODE:
+      parsed.data.LLM_PARSER_ENABLED && parsed.data.LLM_PARSER_MODE === "off" ? "shadow" : parsed.data.LLM_PARSER_MODE
+  };
 }

@@ -18,6 +18,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 | --- | --- |
 | Business Profile | schema validation, missing profile, disabled intent, tenant examples, alias expansion, invalid profile rollback behavior. |
 | Query parser/understanding | stock, price, stock+price, search-only, unsupported text, Thai/English variants from Business Profile, product code, barcode-like input, context-only follow-up. |
+| LLM slow-path parser | LiteLLM request shape, JSON-only parser output, malformed JSON, wrong enum, empty keyword, low confidence, timeout, shadow mode no user-facing change. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
 | Dedup | duplicate webhook event sends at most one reply. |
 | SML client | allowed tool call, blocked write tool, timeout, malformed JSON, missing `content[0].text`, schema mismatch. |
@@ -27,7 +28,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 Latest local run on 2026-06-10:
 
-- `npm test`: 11 files, 35 tests passed.
+- `npm test`: 14 files, 54 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -60,6 +61,8 @@ Current covered cases:
 - SML timeout/failure/circuit-open path returns a safe fallback through orchestrator tests.
 - Alert dedup prevents repeated ops-chat messages for the same alert key.
 - Business Profile v1 validates `profiles/construction-demo.json` and drives parser phrases, aliases, help examples, and fallback hints.
+- LiteLLM parser validates JSON output, rejects hallucinated intent enums, rejects low confidence/empty keyword/timeouts, and records parser metrics.
+- `/internal/parse` requires internal bearer auth and returns parser output without calling SML.
 
 When SML endpoint is reachable, run read-only smoke only:
 
@@ -113,6 +116,7 @@ Test with:
 - LINE private flow: raw-body signature validation works.
 - LINE group flow: mention gate works.
 - SML endpoint: confirm production vs sandbox before any real-data checks.
+- LLM parser: when enabled, `POST /internal/parse` for `มีปูนตราช้างเหลือไหม` should return `intent=stock` and `keyword=ปูนตราช้าง`; Telegram replies should remain unchanged in shadow mode.
 - Logs: confirm request IDs, cache status, SML latency, and no secret leakage.
 
 Latest server smoke on `192.168.2.109:3060`:

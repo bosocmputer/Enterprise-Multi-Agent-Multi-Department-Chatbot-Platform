@@ -3,6 +3,9 @@ import { z } from "zod";
 import { LineAdapter } from "./channels/lineAdapter.js";
 import { loadBusinessProfile, type BusinessProfile } from "./config/businessProfile.js";
 import type { AppConfig } from "./config/env.js";
+import type { LookupLlmParser } from "./core/llmParser.js";
+import { runLlmParseWithTelemetry } from "./core/llmParser.js";
+import { createLlmParser } from "./core/llmParserFactory.js";
 import { LookupOrchestrator } from "./core/lookupOrchestrator.js";
 import { runLookupWithTelemetry } from "./core/lookupTelemetry.js";
 import { formatLookupReply } from "./core/responseFormatter.js";
@@ -22,9 +25,14 @@ const lookupBodySchema = z.object({
   userId: z.string().optional()
 });
 
+const parseBodySchema = z.object({
+  text: z.string().min(1)
+});
+
 export interface AppDependencies {
   alerts?: AlertService;
   businessProfile?: BusinessProfile;
+  llmParser?: LookupLlmParser;
   smlClient?: SmlClient;
   lookup?: LookupOrchestrator;
   metrics?: MetricsRegistry;
@@ -47,6 +55,7 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
   const metrics = dependencies.metrics ?? new MetricsRegistry();
   const alerts = dependencies.alerts;
   const businessProfile = dependencies.businessProfile ?? loadBusinessProfile(config.BUSINESS_PROFILE_PATH);
+  const llmParser = dependencies.llmParser ?? createLlmParser(config, businessProfile);
   const datasetLabel = businessProfile.sml.datasetLabel ?? config.SML_DATASET_LABEL;
   const tenantStatus = businessProfile.sml.tenantStatus ?? config.SML_TENANT_STATUS;
 
@@ -69,6 +78,8 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
     new LookupOrchestrator(smlClient, state, {
       businessProfile,
       datasetLabel,
+      llmParser,
+      llmParserMode: config.LLM_PARSER_MODE,
       priceCacheTtlSeconds: config.PRICE_CACHE_TTL_SECONDS,
       searchCacheTtlSeconds: config.PRODUCT_SEARCH_CACHE_TTL_SECONDS,
       stockCacheTtlSeconds: config.STOCK_CACHE_TTL_SECONDS,
@@ -144,6 +155,31 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
         reply: formatLookupReply(result, businessProfile)
       };
     });
+
+    app.post("/internal/parse", async (request, reply) => {
+      if (!requireInternalAuth(config, request, reply)) return reply;
+      if (!llmParser) {
+        return reply.code(503).send({ error: "llm_parser_unavailable" });
+      }
+
+      const parsed = parseBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "invalid_request",
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path,
+            message: issue.message
+          }))
+        });
+      }
+
+      const result = await runLlmParseWithTelemetry(llmParser, parsed.data.text, {
+        logger,
+        metrics,
+        mode: config.LLM_PARSER_MODE
+      });
+      return { result };
+    });
   }
 
   if (config.METRICS_ENABLED) {
@@ -165,6 +201,8 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       dedupTtlSeconds: config.TELEGRAM_DEDUP_TTL_SECONDS,
       groupPrefixes: config.LINE_GROUP_PREFIXES,
       logger,
+      llmParser,
+      llmParserMode: config.LLM_PARSER_MODE,
       metrics,
       rateLimiter: state,
       rateLimitPerMinute: config.RATE_LIMIT_PER_MINUTE
@@ -193,6 +231,8 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       dedupStore: state,
       dedupTtlSeconds: config.TELEGRAM_DEDUP_TTL_SECONDS,
       logger,
+      llmParser,
+      llmParserMode: config.LLM_PARSER_MODE,
       metrics,
       rateLimiter: state,
       rateLimitPerMinute: config.RATE_LIMIT_PER_MINUTE

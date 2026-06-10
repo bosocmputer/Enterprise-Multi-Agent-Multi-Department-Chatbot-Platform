@@ -22,6 +22,8 @@ const pollingWorker = config.TELEGRAM_POLLING_ENABLED
         dedupStore: runtime.state,
         dedupTtlSeconds: config.TELEGRAM_DEDUP_TTL_SECONDS,
         logger,
+        llmParser: runtime.llmParser,
+        llmParserMode: config.LLM_PARSER_MODE,
         metrics: runtime.metrics,
         rateLimiter: runtime.state,
         rateLimitPerMinute: config.RATE_LIMIT_PER_MINUTE

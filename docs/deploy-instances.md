@@ -52,6 +52,16 @@ LINE_ENABLED
 LINE_CHANNEL_SECRET
 LINE_CHANNEL_ACCESS_TOKEN
 LINE_GROUP_PREFIXES
+LLM_PARSER_ENABLED
+LLM_PARSER_MODE
+LLM_PROVIDER
+LITELLM_BASE_URL
+LITELLM_API_KEY
+LITELLM_MODEL
+OPENAI_API_KEY
+OPENAI_BASE_URL
+LLM_PARSER_TIMEOUT_MS
+LLM_MIN_CONFIDENCE
 LOG_LEVEL
 ALERTS_ENABLED
 ALERT_TELEGRAM_BOT_TOKEN
@@ -69,8 +79,6 @@ CLOUDFLARE_TUNNEL_HOSTNAME
 Optional:
 
 ```text
-LLM_PROVIDER
-OPENAI_API_KEY
 ANTHROPIC_API_KEY
 LANGFUSE_PUBLIC_KEY
 LANGFUSE_SECRET_KEY
@@ -120,6 +128,12 @@ curl -fsS -X POST http://localhost:<port>/internal/lookup \
   -H 'Authorization: Bearer <token>' \
   -H 'Content-Type: application/json' \
   -d '{"text":"PAINT-01424 มีไหม ราคาเท่าไร"}'
+
+# smoke LLM parser when enabled
+curl -fsS -X POST http://localhost:<port>/internal/parse \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"มีปูนตราช้างเหลือไหม"}'
 ```
 
 ## Release Checklist
@@ -136,6 +150,7 @@ curl -fsS -X POST http://localhost:<port>/internal/lookup \
 - No write SML tool in allowlist.
 - Redis connectivity verified.
 - `/metrics` exposes lookup, Telegram, and SML tool metrics without secrets.
+- If LLM parser is enabled, `/metrics` exposes parser attempt and latency metrics without raw prompts or secrets.
 - `/ready`, `/metrics`, and `/internal/lookup` reject unauthenticated production requests.
 - `SML_TENANT_STATUS=demo` is explicit until real customer tenant smoke passes.
 - Cache TTLs reviewed with business users.
@@ -144,6 +159,24 @@ curl -fsS -X POST http://localhost:<port>/internal/lookup \
 - Dev alerts use `ALERT_TELEGRAM_BOT_TOKEN` when set, falling back to `TELEGRAM_BOT_TOKEN` only for small pilot setups.
 - Health/readiness endpoints verified.
 - Rollback path known.
+
+## LLM Parser Pilot Config
+
+The parser is optional and must never answer stock or price facts. It only emits structured lookup JSON that the app validates before using.
+
+Recommended pilot shadow config:
+
+```text
+LLM_PARSER_ENABLED=true
+LLM_PARSER_MODE=shadow
+LLM_PROVIDER=litellm
+LITELLM_BASE_URL=http://192.168.2.248:4000
+LITELLM_MODEL=openrouter/openrouter/free
+LLM_PARSER_TIMEOUT_MS=7000
+LLM_MIN_CONFIDENCE=0.75
+```
+
+Store the key only in server `.env` as `LITELLM_API_KEY` or `OPENAI_API_KEY`. The current LiteLLM Swagger requires the `x-litellm-api-key` header; do not commit the key.
 
 ## Git-Based Pilot Deploy
 

@@ -6,7 +6,7 @@ The current product focus is not a multi-department agent platform. The practica
 
 ## Current State
 
-This repo now contains the production-ready demo runtime: Fastify lookup API, SML MCP read-only client, Redis-backed cache/dedup/rate limit/context state, Telegram polling/webhook adapter, LINE webhook adapter, production metrics, alerts, Business Profile config, tests, and isolated Docker Compose deployment. The next architecture step is adding an optional LLM slow-path for ambiguous messages while keeping SML as the only source of stock/price facts.
+This repo now contains the production-ready demo runtime: Fastify lookup API, SML MCP read-only client, Redis-backed cache/dedup/rate limit/context state, Telegram polling/webhook adapter, LINE webhook adapter, production metrics, alerts, Business Profile config, optional LiteLLM shadow parser, tests, and isolated Docker Compose deployment. The LLM path parses ambiguous staff text into structured JSON only; SML remains the only source of stock/price facts.
 
 Pilot service:
 
@@ -15,6 +15,7 @@ Pilot service:
 - Server path: `/home/bosscatdog/parts-lookup-chatbot`
 - Data source: SML MCP `http://192.168.2.248:3515` using construction-demo data until the real customer tenant is ready.
 - Business Profile: `profiles/construction-demo.json`
+- Optional LLM parser: LiteLLM `http://192.168.2.248:4000`, model `openrouter/openrouter/free`, enabled only by `.env`.
 
 Telegram polling is enabled on the pilot server. LINE is implemented behind env flags and requires LINE credentials plus public tunnel config. Dev alerts can use a separate Telegram alert bot via `ALERT_TELEGRAM_BOT_TOKEN`. Keep all tokens only in server `.env`; never commit or paste them into docs.
 
