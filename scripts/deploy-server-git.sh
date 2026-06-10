@@ -85,7 +85,7 @@ docker compose ps
 
 if [[ "$run_smoke" == "1" ]]; then
   for attempt in {1..30}; do
-    if curl -fsS "$base_url/health" >/dev/null; then
+    if curl -fsS "$base_url/health" >/dev/null 2>&1; then
       break
     fi
     if [[ "$attempt" == "30" ]]; then
