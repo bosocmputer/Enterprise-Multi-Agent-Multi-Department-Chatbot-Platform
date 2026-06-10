@@ -14,6 +14,7 @@ The first production shape is a read-only lookup service:
 - The bot answers stock and price using SML MCP read-only tools.
 - The bot is optimized for fast deterministic lookup before AI, using tenant-configured intent phrases and examples.
 - AI/LLM parsing is optional and used only for ambiguous messages.
+- Thai tokenization/segmentation tools such as PyThaiNLP are developer evaluation tools first; they help improve aliases, context guards, and tests without joining the runtime hot path.
 - Write actions such as sale reservation creation are out of scope until explicitly approved.
 
 ## 2. Goals
@@ -161,6 +162,7 @@ Use BullMQ only when a task is intentionally slow or asynchronous:
 
 - SML timeout retry after the user already received a fallback.
 - Product alias/index refresh from tenant catalog or external profile source.
+- Offline Thai query evaluation from reviewed/redacted no-match and unsupported examples.
 - Cache warming.
 - Audit export.
 - Optional LLM parsing that may exceed chat response budget.
@@ -283,6 +285,7 @@ Required states:
 - Do not pass raw chat messages directly into SML tools without structured parsing.
 - Do not allow arbitrary tool names from the LLM or user text.
 - Do not hardcode business-specific product keywords, brand aliases, or tenant examples in source code.
+- Do not feed raw channel logs into Thai query evaluation; use reviewed/redacted examples without chat IDs, user IDs, tokens, secrets, or raw provider payloads.
 - Validate LLM parse output with a strict JSON schema and confidence threshold.
 - Maintain an explicit allowlist of SML tools.
 - Use least-privileged `mcp-access-mode`; confirm whether `general` can call all three read-only tools, otherwise use `sales`.

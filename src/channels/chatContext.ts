@@ -49,6 +49,17 @@ export async function resolveTextWithContext(options: {
     return { kind: "lookup", text: `${exactCode} ${intentPrompt(context.intent, options.businessProfile)}` };
   }
 
+  const contextRequiredPhrase = detectContextRequiredPhrase(normalized);
+  if (contextRequiredPhrase) {
+    return resolveContextRequiredPhrase({
+      businessProfile: options.businessProfile,
+      context,
+      marker: contextRequiredPhrase.marker,
+      text: normalized,
+      type: contextRequiredPhrase.type
+    });
+  }
+
   const intentOnly = parseIntentOnly(normalized, options.businessProfile);
   if (intentOnly) {
     if (!context?.lastProduct) {
@@ -62,6 +73,10 @@ export async function resolveTextWithContext(options: {
 
   if (context?.intent) {
     return { kind: "lookup", text: `${normalized} ${intentPrompt(context.intent, options.businessProfile)}` };
+  }
+
+  if (isKnownBareProductKeyword(normalized, options.businessProfile)) {
+    return { kind: "lookup", text: `${normalized} ${phraseForIntent(options.businessProfile, "search_product")}` };
   }
 
   return { kind: "lookup", text: normalized };
@@ -146,4 +161,98 @@ function parseNumericSelection(text: string): number | undefined {
 function parseExactCode(text: string): string | undefined {
   const normalized = text.trim();
   return /^[A-Z0-9][A-Z0-9_-]{2,}$/i.test(normalized) ? normalized : undefined;
+}
+
+function resolveContextRequiredPhrase(options: {
+  businessProfile: BusinessProfile;
+  context?: ChatContext;
+  marker: string;
+  text: string;
+  type: "product_reference" | "selection_constraint";
+}): ContextResolution {
+  if (options.type === "selection_constraint") {
+    if (options.context?.candidates?.length) {
+      return {
+        kind: "reply",
+        text: `ตอนนี้ยังเลือกสินค้าจากคำว่า "${options.marker}" อัตโนมัติไม่ได้ กรุณาเลือกเลข 1-${options.context.candidates.length} จากรายการล่าสุด หรือส่งรหัสสินค้า`
+      };
+    }
+    return {
+      kind: "reply",
+      text: `ตอนนี้ยังเลือกสินค้าจากคำว่า "${options.marker}" ไม่ได้ กรุณาส่งชื่อสินค้า รุ่น ยี่ห้อ หรือรหัสสินค้าให้ชัดเจนขึ้น`
+    };
+  }
+
+  const requestedIntent = parseIntentFromText(options.text, options.businessProfile) ?? options.context?.intent;
+  if (options.context?.lastProduct) {
+    return {
+      kind: "lookup",
+      text: `${options.context.lastProduct.code} ${intentPrompt(requestedIntent, options.businessProfile)}`
+    };
+  }
+  if (options.context?.candidates?.length) {
+    return {
+      kind: "reply",
+      text: `ยังไม่รู้ว่า "${options.marker}" คือรายการไหน กรุณาเลือกเลข 1-${options.context.candidates.length} จากรายการล่าสุด หรือส่งรหัสสินค้า`
+    };
+  }
+  return {
+    kind: "reply",
+    text: "ยังไม่รู้ว่าสินค้าตัวไหน กรุณาส่งรหัสสินค้า ชื่อสินค้า หรือค้นหาสินค้าก่อน"
+  };
+}
+
+function detectContextRequiredPhrase(
+  text: string
+): { marker: string; type: "product_reference" | "selection_constraint" } | undefined {
+  const normalized = normalizeText(text);
+  const productReferences = ["อันที่แล้ว", "รายการนี้", "ตัวนี้", "อันนี้", "ชิ้นนี้", "รุ่นนี้"];
+  const selectionConstraints = ["แบบถูกสุด", "ถูกสุด", "แพงสุด", "ตัวท็อป", "ตัวไหน", "อันไหน"];
+
+  for (const marker of [...productReferences].sort((a, b) => b.length - a.length)) {
+    if (normalized.includes(normalizeText(marker))) return { marker, type: "product_reference" };
+  }
+  for (const marker of [...selectionConstraints].sort((a, b) => b.length - a.length)) {
+    if (normalized.includes(normalizeText(marker))) return { marker, type: "selection_constraint" };
+  }
+  return undefined;
+}
+
+function parseIntentFromText(text: string, profile: BusinessProfile): LookupIntent | undefined {
+  const normalized = normalizeText(text);
+  const hasStockPrice = containsAny(normalized, profile.intentPhrases.stock_price);
+  const hasStock = containsAny(normalized, profile.intentPhrases.stock);
+  const hasPrice = containsAny(normalized, profile.intentPhrases.price);
+  if (hasStockPrice || (hasStock && hasPrice)) return "stock_price";
+  if (hasPrice) return "price";
+  if (hasStock) return "stock";
+  return undefined;
+}
+
+function isKnownBareProductKeyword(text: string, profile: BusinessProfile): boolean {
+  const normalized = normalizeText(text);
+  if (!normalized || parseIntentFromText(normalized, profile)) return false;
+
+  return knownProductTerms(profile).some((term) => {
+    const normalizedTerm = normalizeText(term);
+    return normalizedTerm && (normalized === normalizedTerm || normalized.includes(normalizedTerm));
+  });
+}
+
+function knownProductTerms(profile: BusinessProfile): string[] {
+  return [
+    ...profile.examples.map((example) => example.keyword),
+    ...profile.aliases.flatMap((alias) => [alias.from, ...alias.to])
+  ];
+}
+
+function containsAny(normalizedInput: string, phrases: string[]): boolean {
+  return phrases.some((term) => {
+    const normalizedTerm = normalizeText(term);
+    return normalizedTerm && normalizedInput.includes(normalizedTerm);
+  });
+}
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
 }

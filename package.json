@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc -p tsconfig.json",
+    "thai:evaluate": "python3 tools/thai-query-eval/thai_query_eval.py --profile profiles/construction-demo.json --input tools/thai-query-eval/fixtures/construction-demo.jsonl --output /tmp/thai-query-eval.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -64,6 +64,18 @@ describe("parseLookupQuery", () => {
     );
   });
 
+  it("parses known bare keywords when context adds a search intent", () => {
+    const result = parseLookupQuery("ปูนตราช้าง หา", profile);
+    expect(result).toMatchObject({
+      status: "parsed",
+      intent: "search_product",
+      keyword: "ปูนตราช้าง"
+    });
+    expect(result.status === "parsed" ? result.searchTerms : []).toEqual(
+      expect.arrayContaining(["ปูนตราช้าง", "ปูน ช้าง"])
+    );
+  });
+
   it("rejects unsupported chatter", () => {
     expect(parseLookupQuery("สวัสดีครับ", profile)).toEqual({
       status: "unsupported",

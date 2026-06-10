@@ -122,10 +122,25 @@ Symptoms:
 Actions:
 
 1. Collect redacted examples.
-2. Add tenant-specific aliases/examples to Business Profile or catalog-derived alias/index data, not source code.
-3. Consider local product alias/index cache if SML search cannot handle common terms directly.
-4. Re-test with known item codes and common store phrases from the tenant profile.
-5. Only add optional LLM parser after profile/context/alias parsing is insufficient.
+2. Run offline Thai query evaluation for Thai examples:
+
+```bash
+python3 -m venv .cache/pythai-eval
+. .cache/pythai-eval/bin/activate
+python -m pip install -r tools/thai-query-eval/requirements.txt
+python tools/thai-query-eval/thai_query_eval.py \
+  --profile profiles/construction-demo.json \
+  --input tools/thai-query-eval/fixtures/construction-demo.jsonl \
+  --output /tmp/thai-query-eval.json
+```
+
+3. Add tenant-specific aliases/examples to Business Profile or catalog-derived alias/index data, not source code.
+4. Add generic context-required guards for vague follow-up phrases only when Redis context is sufficient.
+5. Consider local product alias/index cache if SML search cannot handle common terms directly.
+6. Re-test with known item codes and common store phrases from the tenant profile.
+7. Keep LiteLLM in `shadow` until deterministic profile/context/alias parsing and PyThaiNLP eval output are reviewed.
+
+The PyThaiNLP tool must use reviewed/redacted input only. It rejects chat IDs, user IDs, tokens, secrets, auth headers, raw provider payloads, and secret-like values.
 
 ## Runbook: LiteLLM Parser Degraded
 

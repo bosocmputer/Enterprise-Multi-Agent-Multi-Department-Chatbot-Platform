@@ -58,6 +58,76 @@ describe("chat context helpers", () => {
     });
   });
 
+  it("asks for a product when a product reference has no context", async () => {
+    await expect(
+      resolveTextWithContext({ businessProfile: profile, key: "k", text: "ตัวนี้ราคาเท่าไหร่" })
+    ).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("ยังไม่รู้ว่าสินค้าตัวไหน")
+    });
+  });
+
+  it("resolves product-reference follow-up against the last product", async () => {
+    const store = new MemoryCacheService();
+    await saveLookupContext({
+      contextStore: store,
+      key: "k",
+      result: {
+        cacheHit: false,
+        datasetLabel: "test",
+        intent: "stock_price",
+        product: { code: "A001", name: "สินค้า A" },
+        status: "success",
+        tenantStatus: "demo"
+      },
+      ttlSeconds: 300
+    });
+
+    await expect(resolveTextWithContext({ businessProfile: profile, contextStore: store, key: "k", text: "ตัวนี้ราคาเท่าไหร่" })).resolves.toEqual({
+      kind: "lookup",
+      text: "A001 ราคา"
+    });
+  });
+
+  it("does not search vague selection constraints without enough context", async () => {
+    await expect(
+      resolveTextWithContext({ businessProfile: profile, key: "k", text: "เอาแบบถูกสุดมีไหม" })
+    ).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("แบบถูกสุด")
+    });
+  });
+
+  it("asks users to choose when selection constraints refer to recent candidates", async () => {
+    const store = new MemoryCacheService();
+    await saveLookupContext({
+      contextStore: store,
+      key: "k",
+      result: {
+        candidates: [
+          { code: "C001", name: "ปูน A" },
+          { code: "C002", name: "ปูน B" }
+        ],
+        intent: "stock",
+        keyword: "ปูน",
+        status: "multiple_matches"
+      },
+      ttlSeconds: 300
+    });
+
+    await expect(resolveTextWithContext({ businessProfile: profile, contextStore: store, key: "k", text: "เอาแบบถูกสุดมีไหม" })).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("เลือกเลข 1-2")
+    });
+  });
+
+  it("turns known bare profile keywords into search lookups instead of generic help", async () => {
+    await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "ปูนตราช้าง" })).resolves.toEqual({
+      kind: "lookup",
+      text: "ปูนตราช้าง หา"
+    });
+  });
+
   it("inherits the prior intent for a bare follow-up keyword", async () => {
     const store = new MemoryCacheService();
     await saveLookupContext({

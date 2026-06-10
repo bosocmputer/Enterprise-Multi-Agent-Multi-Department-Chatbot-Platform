@@ -3,7 +3,7 @@
 ## System Overview
 
 - Product boundary: read-only chat interface for staff to retrieve product stock and price from SML across multiple business domains.
-- Main components: Fastify lookup service, Telegram polling/webhook adapter, LINE adapter, normalized message router, tenant Business Profile, query understanding layer, lookup orchestrator, Redis cache/session/dedup, SML MCP client, response formatter, audit logger.
+- Main components: Fastify lookup service, Telegram polling/webhook adapter, LINE adapter, normalized message router, tenant Business Profile, query understanding layer, lookup orchestrator, Redis cache/session/dedup, SML MCP client, response formatter, audit logger, and offline Thai query evaluation tooling.
 - External systems: Telegram Bot API, LINE Messaging API, SML MCP HTTP server, Redis, optional LLM provider.
 - Data stores: Redis for idempotency locks, rate limits, short-lived lookup cache, and last-product session context.
 - Queue: BullMQ is reserved for slow/background work; it is not part of the default fast lookup path.
@@ -21,6 +21,7 @@
 | SML client | Call `/call`, enforce read-only tool allowlist, parse `content[0].text`, validate schemas. | `src/integrations/smlClient.ts` |
 | Cache/session | Redis cache, dedup, rate limit, readiness, multiple-match candidates, and last-product context. | `src/services/cacheService.ts`, `src/services/redisStateService.ts` |
 | Audit/logging/metrics | Structured lookup logs, hashed chat/user IDs, Prometheus-style counters/histograms without secrets or raw sensitive payloads. | `src/core/lookupTelemetry.ts`, `src/observability/*` |
+| Thai query evaluation | Offline PyThaiNLP analysis of reviewed/redacted no-match and unsupported examples to propose aliases, context guards, and regression fixtures. It is not imported by runtime code. | `tools/thai-query-eval/*` |
 | Slow jobs | Background retries, cache warming, alias/index refresh, optional LLM parsing. | `src/queues/*` |
 
 ## Runtime Boundary
@@ -89,6 +90,7 @@ Use it for:
 - product alias/index refresh from tenant profile or catalog data
 - non-urgent observability export
 - optional LiteLLM parse for ambiguous language that cannot be resolved by context/config
+- offline PyThaiNLP evaluation of reviewed Thai examples for alias/context/test improvements
 
 ## Business Profile Contract
 
@@ -111,6 +113,7 @@ Rules:
 - The lookup orchestrator only receives structured queries; it does not parse raw chat text directly.
 - In `shadow` mode, LLM parser output is logged/measured but does not change the user-facing reply.
 - In `assist` mode, LLM parser output may be used only when deterministic parsing is unsupported and local validation/confidence checks pass.
+- PyThaiNLP is a developer evaluation tool for lexical Thai segmentation and alias discovery; it must not become a stock/price source and must not run in the default request path.
 
 ## Failure Boundaries
 

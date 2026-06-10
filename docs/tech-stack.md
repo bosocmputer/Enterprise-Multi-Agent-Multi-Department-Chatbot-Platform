@@ -17,6 +17,7 @@
 | Logging | Pino | `https://github.com/pinojs/pino` | Structured JSON logs with redaction and high throughput. |
 | Tracing/metrics | OpenTelemetry JS | `https://github.com/open-telemetry/opentelemetry-js` | Standard traces/metrics across webhook, cache, SML, and replies. |
 | Circuit breaker | opossum or small local wrapper | `https://github.com/nodeshift/opossum` | Fail fast around SML if repeated failures occur. |
+| Thai query evaluation | PyThaiNLP core package | `https://pythainlp.org/docs/5.3.4/` | Offline analysis of reviewed Thai no-match/unsupported examples; not installed in the app runtime image. |
 
 ## Optional Later
 
@@ -37,6 +38,7 @@
 - Do not use an agent memory framework for store chat memory; Redis last-product context is enough.
 - Do not put BullMQ in the hot path for every lookup.
 - Do not call an LLM for exact stock/price questions.
+- Do not add PyThaiNLP or any Python tokenizer to the production hot path until an offline eval proves a measurable search-quality gain.
 - Do not hardcode tenant product names, brand aliases, or business-specific examples in source code.
 
 ## Selection Notes

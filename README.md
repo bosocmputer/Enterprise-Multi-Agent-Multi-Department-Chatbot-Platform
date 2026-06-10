@@ -6,7 +6,7 @@ The current product focus is not a multi-department agent platform. The practica
 
 ## Current State
 
-This repo now contains the production-ready demo runtime: Fastify lookup API, SML MCP read-only client, Redis-backed cache/dedup/rate limit/context state, Telegram polling/webhook adapter, LINE webhook adapter, production metrics, alerts, Business Profile config, optional LiteLLM shadow parser, tests, and isolated Docker Compose deployment. The LLM path parses ambiguous staff text into structured JSON only; SML remains the only source of stock/price facts.
+This repo now contains the production-ready demo runtime: Fastify lookup API, SML MCP read-only client, Redis-backed cache/dedup/rate limit/context state, Telegram polling/webhook adapter, LINE webhook adapter, production metrics, alerts, Business Profile config, optional LiteLLM shadow parser, Thai query evaluation tooling, tests, and isolated Docker Compose deployment. The LLM path parses ambiguous staff text into structured JSON only; SML remains the only source of stock/price facts.
 
 Pilot service:
 
@@ -29,6 +29,15 @@ docker compose up --build -d
 curl -fsS http://localhost:3060/health
 curl -fsS -H "Authorization: Bearer $INTERNAL_API_TOKEN" http://localhost:3060/ready
 BASE_URL=http://localhost:3060 INTERNAL_API_TOKEN="$INTERNAL_API_TOKEN" bash scripts/prod-smoke.sh
+
+# optional offline Thai query evaluation; not part of app runtime
+python3 -m venv .cache/pythai-eval
+. .cache/pythai-eval/bin/activate
+python -m pip install -r tools/thai-query-eval/requirements.txt
+python tools/thai-query-eval/thai_query_eval.py \
+  --profile profiles/construction-demo.json \
+  --input tools/thai-query-eval/fixtures/construction-demo.jsonl \
+  --output /tmp/thai-query-eval.json
 
 # pilot server deploy after commit + push
 RUN_SMOKE=1 bash scripts/deploy-server-git.sh

@@ -1,0 +1,6 @@
+{"id":"thai-001","text":"มีปูนตราช้างเหลือไหม","expectedIntent":"stock","outcome":"no_match","source":"reviewed_manual_fixture"}
+{"id":"thai-002","text":"ปูนตราช้าง","expectedIntent":"search_product","outcome":"unsupported","source":"reviewed_manual_fixture"}
+{"id":"thai-003","text":"เอาแบบถูกสุดมีไหม","expectedIntent":"stock","outcome":"no_match","source":"reviewed_manual_fixture"}
+{"id":"thai-004","text":"ตัวนี้ราคาเท่าไหร่","expectedIntent":"price","outcome":"no_match","source":"reviewed_manual_fixture"}
+{"id":"thai-005","text":"น้ำมัน ราคา","expectedIntent":"price","outcome":"multi_match","source":"reviewed_manual_fixture"}
+{"id":"thai-006","text":"PAINT-01424 ราคา","expectedIntent":"price","outcome":"success","source":"reviewed_manual_fixture"}

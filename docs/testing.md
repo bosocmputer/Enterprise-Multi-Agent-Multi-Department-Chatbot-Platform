@@ -19,6 +19,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 | Business Profile | schema validation, missing profile, disabled intent, tenant examples, alias expansion, invalid profile rollback behavior. |
 | Query parser/understanding | stock, price, stock+price, search-only, unsupported text, Thai/English variants from Business Profile, product code, barcode-like input, context-only follow-up. |
 | LLM slow-path parser | LiteLLM request shape, JSON-only parser output, malformed JSON, wrong enum, empty keyword, low confidence, timeout, shadow mode no user-facing change. |
+| Thai query evaluation | PyThaiNLP tokenization fixture, custom dictionary from Business Profile aliases/examples, sensitive-key rejection, context-required phrase suggestions. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
 | Dedup | duplicate webhook event sends at most one reply. |
 | SML client | allowed tool call, blocked write tool, timeout, malformed JSON, missing `content[0].text`, schema mismatch. |
@@ -28,7 +29,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 Latest local run on 2026-06-10:
 
-- `npm test`: 14 files, 54 tests passed.
+- `npm test`: 14 files, 60 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -63,6 +64,23 @@ Current covered cases:
 - Business Profile v1 validates `profiles/construction-demo.json` and drives parser phrases, aliases, help examples, and fallback hints.
 - LiteLLM parser validates JSON output, rejects hallucinated intent enums, rejects low confidence/empty keyword/timeouts, and records parser metrics.
 - `/internal/parse` requires internal bearer auth and returns parser output without calling SML.
+- Offline Thai query evaluation fixture exists for `มีปูนตราช้างเหลือไหม`, `ปูนตราช้าง`, `เอาแบบถูกสุดมีไหม`, `ตัวนี้ราคาเท่าไหร่`, `น้ำมัน ราคา`, and `PAINT-01424 ราคา`.
+- Context guard replies with clarification for vague references such as `ตัวนี้ราคาเท่าไหร่` when no product context exists.
+- Context guard resolves `ตัวนี้ราคาเท่าไหร่` against the last product when safe.
+- Selection constraints such as `เอาแบบถูกสุดมีไหม` do not trigger SML search without enough context.
+- Known bare Business Profile terms such as `ปูนตราช้าง` become search lookups instead of generic help.
+
+Optional local Thai query evaluation gate:
+
+```bash
+python3 -m venv .cache/pythai-eval
+. .cache/pythai-eval/bin/activate
+python -m pip install -r tools/thai-query-eval/requirements.txt
+python tools/thai-query-eval/thai_query_eval.py \
+  --profile profiles/construction-demo.json \
+  --input tools/thai-query-eval/fixtures/construction-demo.jsonl \
+  --output /tmp/thai-query-eval.json
+```
 
 When SML endpoint is reachable, run read-only smoke only:
 
@@ -117,6 +135,7 @@ Test with:
 - LINE group flow: mention gate works.
 - SML endpoint: confirm production vs sandbox before any real-data checks.
 - LLM parser: when enabled, `POST /internal/parse` for `มีปูนตราช้างเหลือไหม` should return `intent=stock` and `keyword=ปูนตราช้าง`; Telegram replies should remain unchanged in shadow mode.
+- Thai query eval: verify PyThaiNLP output suggests existing Business Profile aliases for `ปูนตราช้าง` and context-required candidates for vague phrases without adding Python to Docker runtime.
 - Logs: confirm request IDs, cache status, SML latency, and no secret leakage.
 
 Latest server smoke on `192.168.2.109:3060`:
