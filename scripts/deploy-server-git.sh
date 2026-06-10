@@ -84,6 +84,17 @@ GIT_SHA="$git_sha" docker compose up --build -d --force-recreate "$compose_servi
 docker compose ps
 
 if [[ "$run_smoke" == "1" ]]; then
+  for attempt in {1..30}; do
+    if curl -fsS "$base_url/health" >/dev/null; then
+      break
+    fi
+    if [[ "$attempt" == "30" ]]; then
+      printf "health check did not pass after %s attempts\n" "$attempt" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+
   set -a
   # shellcheck disable=SC1091
   . ./.env
