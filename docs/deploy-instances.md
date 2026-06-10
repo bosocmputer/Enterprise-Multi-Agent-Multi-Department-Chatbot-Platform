@@ -152,7 +152,7 @@ curl -fsS -X POST http://localhost:<port>/internal/parse \
 - `/metrics` exposes lookup, Telegram, and SML tool metrics without secrets.
 - If LLM parser is enabled, `/metrics` exposes parser attempt and latency metrics without raw prompts or secrets.
 - `/ready`, `/metrics`, and `/internal/lookup` reject unauthenticated production requests.
-- `SML_TENANT_STATUS=demo` is explicit until real customer tenant smoke passes.
+- `SML_TENANT_STATUS=real` is explicit after `192.168.2.248:3515` real SML data smoke passes.
 - Cache TTLs reviewed with business users.
 - Timeout/circuit breaker config reviewed.
 - Logs redact secrets.

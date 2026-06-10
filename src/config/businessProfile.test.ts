@@ -9,8 +9,8 @@ describe("business profile", () => {
       businessType: "construction-materials",
       tenantId: "construction-demo",
       sml: {
-        datasetLabel: "construction-demo",
-        tenantStatus: "demo"
+        datasetLabel: "sml-192.168.2.248",
+        tenantStatus: "real"
       }
     });
     expect(formatBusinessProfileHelp(profile)).toContain("มีปูนเหลือไหม");

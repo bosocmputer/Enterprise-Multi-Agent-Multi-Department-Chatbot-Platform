@@ -13,7 +13,7 @@ Pilot service:
 - Local: `http://localhost:3060`
 - Server: `http://192.168.2.109:3060`
 - Server path: `/home/bosscatdog/parts-lookup-chatbot`
-- Data source: SML MCP `http://192.168.2.248:3515` using construction-demo data until the real customer tenant is ready.
+- Data source: SML MCP `http://192.168.2.248:3515`; currently treated as real SML data for this construction-materials profile.
 - Business Profile: `profiles/construction-demo.json`
 - Optional LLM parser: LiteLLM `http://192.168.2.248:4000`, model `openrouter/openrouter/free`, enabled only by `.env`.
 

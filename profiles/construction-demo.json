@@ -47,7 +47,7 @@
     "fallbackProductHints": "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น"
   },
   "sml": {
-    "datasetLabel": "construction-demo",
-    "tenantStatus": "demo"
+    "datasetLabel": "sml-192.168.2.248",
+    "tenantStatus": "real"
   }
 }
