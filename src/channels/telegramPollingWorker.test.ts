@@ -172,7 +172,7 @@ describe("TelegramPollingWorker", () => {
 
     await expect(worker.pollOnce()).resolves.toEqual({ received: 1, handled: 1, ignored: 0 });
     await expect(worker.pollOnce()).resolves.toEqual({ received: 1, handled: 1, ignored: 0 });
-    expect(sentMessages[0]?.text).toContain("พบหลายรายการ");
+    expect(sentMessages[0]?.text).toContain("เจอหลายรายการ");
     expect(sentMessages[1]?.text).toContain("A001 - สินค้า A");
     expect(sentMessages[1]?.text).toContain("77");
   });

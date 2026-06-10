@@ -7,6 +7,7 @@ export type ParseOutcome =
       keyword: string;
       isExactCode: boolean;
       searchTerms: string[];
+      source?: "deterministic" | "llm";
     }
   | {
       status: "unsupported";
@@ -17,6 +18,13 @@ export interface ProductCandidate {
   code: string;
   name: string;
   unit?: string;
+}
+
+export interface ProductSearchResult {
+  products: ProductCandidate[];
+  returned?: number;
+  summary?: string;
+  totalFound?: number;
 }
 
 export interface StockLine {
@@ -62,6 +70,11 @@ export type LookupResult =
       intent: LookupIntent;
       keyword: string;
       candidates: ProductCandidate[];
+      hasMore?: boolean;
+      pageSize?: number;
+      pageStart?: number;
+      returned?: number;
+      totalFound?: number;
     }
   | {
       status: "unsupported";

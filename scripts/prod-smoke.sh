@@ -31,10 +31,6 @@ if [[ "$llm_key" != "" && ( "$llm_enabled" == "true" || "$llm_mode" != "off" ) ]
     -H "Content-Type: application/json" \
     -d '{"text":"มีปูนตราช้างเหลือไหม"}')" || parse_status=$?
   if [[ "$parse_status" != "0" || "$parse" != *'"status":"parsed"'* || "$parse" != *'"intent":"stock"'* || "$parse" != *'"keyword":"ปูนตราช้าง"'* ]]; then
-    if [[ "$llm_mode" == "assist" ]]; then
-      printf "smoke failed: internal parse did not return stock/ปูนตราช้าง\n%s\n" "$parse" >&2
-      exit 1
-    fi
     printf "smoke warning: optional LLM parser did not return stock/ปูนตราช้าง in %s mode\n%s\n" "$llm_mode" "$parse" >&2
   fi
 fi

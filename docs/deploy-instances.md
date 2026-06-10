@@ -164,19 +164,19 @@ curl -fsS -X POST http://localhost:<port>/internal/parse \
 
 The parser is optional and must never answer stock or price facts. It only emits structured lookup JSON that the app validates before using.
 
-Recommended pilot shadow config:
+Recommended pilot assist config:
 
 ```text
 LLM_PARSER_ENABLED=true
-LLM_PARSER_MODE=shadow
+LLM_PARSER_MODE=assist
 LLM_PROVIDER=litellm
 LITELLM_BASE_URL=http://192.168.2.248:4000
 LITELLM_MODEL=openrouter/openrouter/free
-LLM_PARSER_TIMEOUT_MS=7000
+LLM_PARSER_TIMEOUT_MS=1800
 LLM_MIN_CONFIDENCE=0.75
 ```
 
-Store the key only in server `.env` as `LITELLM_API_KEY` or `OPENAI_API_KEY`. The current LiteLLM Swagger requires the `x-litellm-api-key` header; do not commit the key.
+Store the key only in server `.env` as `LITELLM_API_KEY` or `OPENAI_API_KEY`. The current LiteLLM Swagger requires the `x-litellm-api-key` header; do not commit the key. In assist mode the LLM may only provide structured intent/search terms; SML remains the source of truth for stock and price. Roll back by changing `LLM_PARSER_MODE=shadow` or `off` and recreating the app container.
 
 ## Git-Based Pilot Deploy
 

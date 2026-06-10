@@ -37,6 +37,7 @@ export async function understandLookupQuery(
     intent: llmParsed.intent,
     keyword: llmParsed.keyword,
     isExactCode: exactCodePattern.test(llmParsed.keyword),
-    searchTerms: llmParsed.searchTerms
+    searchTerms: llmParsed.searchTerms,
+    source: "llm"
   };
 }

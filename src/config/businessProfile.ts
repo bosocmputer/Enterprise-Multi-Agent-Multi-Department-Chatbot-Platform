@@ -6,6 +6,16 @@ export const lookupIntentSchema = z.enum(["search_product", "stock", "price", "s
 
 const phraseSchema = z.array(z.string().min(1)).default([]);
 
+const defaultReplyStyle = {
+  fallbackProductHints: "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น",
+  helpFooter: "ถ้าผมเจอหลายรายการ ให้ตอบเลข 1-5 เพื่อเลือก หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
+  helpIntro: "ส่งชื่อสินค้า รหัส รุ่น หรือยี่ห้อมาได้เลยครับ ผมจะช่วยเช็กสต็อก/ราคาให้จาก SML",
+  moreResultsPrompt: "ตอบเลข 1-5 เพื่อเลือกรายการ หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
+  multiMatchPrompt: "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งรหัสสินค้า/คำค้นที่เจาะจงขึ้น",
+  noContextPrompt: "ยังไม่มีรายการล่าสุดให้เลือก กรุณาส่งรหัสสินค้า ชื่อสินค้า หรือค้นหาสินค้าก่อน",
+  noMoreResultsPrompt: "แสดงรายการชุดนี้ครบแล้วครับ ถ้ายังไม่เจอ ลองส่งคำค้นให้เฉพาะเจาะจงขึ้น"
+};
+
 export const businessProfileSchema = z
   .object({
     aliases: z
@@ -49,9 +59,15 @@ export const businessProfileSchema = z
     locale: z.string().min(2).default("th-TH"),
     replyStyle: z
       .object({
-        fallbackProductHints: z.string().default("ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น")
+        fallbackProductHints: z.string().default(defaultReplyStyle.fallbackProductHints),
+        helpFooter: z.string().default(defaultReplyStyle.helpFooter),
+        helpIntro: z.string().default(defaultReplyStyle.helpIntro),
+        moreResultsPrompt: z.string().default(defaultReplyStyle.moreResultsPrompt),
+        multiMatchPrompt: z.string().default(defaultReplyStyle.multiMatchPrompt),
+        noContextPrompt: z.string().default(defaultReplyStyle.noContextPrompt),
+        noMoreResultsPrompt: z.string().default(defaultReplyStyle.noMoreResultsPrompt)
       })
-      .default({ fallbackProductHints: "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น" }),
+      .default(defaultReplyStyle),
     sml: z
       .object({
         datasetLabel: z.string().min(1).optional(),
@@ -98,10 +114,9 @@ export function loadBusinessProfile(profilePath: string): BusinessProfile {
 export function formatBusinessProfileHelp(profile: BusinessProfile): string {
   const examples = profile.helpExamples.length > 0 ? profile.helpExamples : profile.examples.map((item) => item.text);
   return [
-    "ถามสต็อก/ราคาได้ เช่น",
+    profile.replyStyle.helpIntro,
     ...examples.slice(0, 5).map((example) => `- ${example}`),
-    "ถ้าพบหลายรายการ ให้ตอบเลข 1-5 เพื่อเลือกสินค้า",
-    "ในกลุ่มให้ mention bot หรือใช้คำสั่ง /stock /price /find"
+    profile.replyStyle.helpFooter
   ].join("\n");
 }
 

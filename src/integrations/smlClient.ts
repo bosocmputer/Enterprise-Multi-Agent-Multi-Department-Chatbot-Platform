@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ProductCandidate, StockLine, PriceLine } from "../core/types.js";
+import type { ProductCandidate, ProductSearchResult, StockLine, PriceLine } from "../core/types.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
 
 const allowedTools = new Set(["search_product", "get_stock_balance", "get_product_price"]);
@@ -117,18 +117,28 @@ export class SmlClient {
   }
 
   async searchProduct(keyword: string, limit = 5): Promise<ProductCandidate[]> {
+    return (await this.searchProductWithMeta(keyword, limit)).products;
+  }
+
+  async searchProductWithMeta(keyword: string, limit = 5): Promise<ProductSearchResult> {
     const data = await this.callTool("search_product", { keyword, limit });
     const parsed = searchProductSchema.safeParse(data);
     if (!parsed.success) {
       throw new SmlClientError("Invalid search_product response", "invalid_response");
     }
-    return parsed.data.products
+    const products = parsed.data.products
       .map((product) => ({
         code: product.code ?? product.item_code ?? product.itemCode ?? "",
         name: product.name ?? product.name_1 ?? "",
         unit: product.unit ?? product.unit_code
       }))
       .filter((product) => product.code && product.name);
+    return {
+      products,
+      returned: parsed.data.returned ?? products.length,
+      summary: parsed.data.summary,
+      totalFound: parsed.data.total_found
+    };
   }
 
   async getStockBalance(code: string): Promise<StockLine[]> {

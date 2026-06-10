@@ -14,6 +14,8 @@ describe("business profile", () => {
       }
     });
     expect(formatBusinessProfileHelp(profile)).toContain("มีปูนเหลือไหม");
+    expect(formatBusinessProfileHelp(profile)).toContain("ส่งชื่อสินค้า");
+    expect(formatBusinessProfileHelp(profile)).not.toContain("ตอนนี้รองรับ");
   });
 
   it("rejects invalid intent regex patterns", () => {

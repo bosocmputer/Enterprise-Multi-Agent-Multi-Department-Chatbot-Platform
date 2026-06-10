@@ -29,6 +29,38 @@ describe("SmlClient", () => {
     ]);
   });
 
+  it("preserves search metadata when requested", async () => {
+    const client = new SmlClient({
+      baseUrl: "http://sml.test",
+      accessMode: "sales",
+      timeoutMs: 1000,
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  returned: 1,
+                  summary: "found 12",
+                  total_found: 12,
+                  products: [{ item_code: "CON-001", name_1: "ปูนซีเมนต์", unit_code: "ถุง" }]
+                })
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    });
+
+    await expect(client.searchProductWithMeta("ปูน", 20)).resolves.toEqual({
+      products: [{ code: "CON-001", name: "ปูนซีเมนต์", unit: "ถุง" }],
+      returned: 1,
+      summary: "found 12",
+      totalFound: 12
+    });
+  });
+
   it("throws on malformed envelope", async () => {
     const client = new SmlClient({
       baseUrl: "http://sml.test",

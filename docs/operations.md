@@ -138,7 +138,7 @@ python tools/thai-query-eval/thai_query_eval.py \
 4. Add generic context-required guards for vague follow-up phrases only when Redis context is sufficient.
 5. Consider local product alias/index cache if SML search cannot handle common terms directly.
 6. Re-test with known item codes and common store phrases from the tenant profile.
-7. Keep LiteLLM in `shadow` until deterministic profile/context/alias parsing and PyThaiNLP eval output are reviewed.
+7. Keep LiteLLM in `assist` only when parser timeout/rejection metrics are healthy; otherwise roll back to `shadow` or `off`.
 
 The PyThaiNLP tool must use reviewed/redacted input only. It rejects chat IDs, user IDs, tokens, secrets, auth headers, raw provider payloads, and secret-like values.
 

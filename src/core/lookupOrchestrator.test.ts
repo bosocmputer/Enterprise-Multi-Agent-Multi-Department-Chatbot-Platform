@@ -131,4 +131,85 @@ describe("LookupOrchestrator", () => {
     });
     expect(llmCalls).toBe(1);
   });
+
+  it("does not call LLM assist for clear queries that return SML candidates", async () => {
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      parse: async () => {
+        llmCalls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => [
+          { code: "A001", name: "น้ำมันสินค้า A" },
+          { code: "A002", name: "น้ำมันสินค้า B" }
+        ]
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "น้ำมัน ราคา" })).resolves.toMatchObject({
+      status: "multiple_matches",
+      keyword: "น้ำมัน"
+    });
+    expect(llmCalls).toBe(0);
+  });
+
+  it("retries deterministic no-match once with LLM assist search terms", async () => {
+    const requestedTerms: string[] = [];
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      parse: async () => {
+        llmCalls += 1;
+        return {
+          aliases: ["ปูนซีเมนต์ ตราช้าง"],
+          confidence: 0.95,
+          intent: "stock",
+          keyword: "ปูนตราช้าง",
+          searchTerms: ["ปูนซีเมนต์ ตราช้าง"],
+          status: "parsed"
+        };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async (keyword: string) => {
+          requestedTerms.push(keyword);
+          return keyword === "ปูนซีเมนต์ ตราช้าง" ? [{ code: "C100", name: "ปูนซีเมนต์ ตราช้าง" }] : [];
+        },
+        getStockBalance: async () => [{ warehouse: "WH-01", qty: 8, unit: "ถุง" }]
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "มีปูนตราช้างเหลือไหม" })).resolves.toMatchObject({
+      status: "success",
+      product: { code: "C100", name: "ปูนซีเมนต์ ตราช้าง" },
+      stock: [{ warehouse: "WH-01", qty: 8 }]
+    });
+    expect(llmCalls).toBe(1);
+    expect(requestedTerms).toEqual(expect.arrayContaining(["ปูนตราช้าง", "ปูน ช้าง", "ปูนซีเมนต์ ตราช้าง"]));
+  });
+
+  it("falls back to no-match when LLM assist is rejected", async () => {
+    const llmParser: LookupLlmParser = {
+      parse: async () => ({ reason: "low_confidence", status: "rejected" })
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => []
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "มีปูนตราช้างเหลือไหม" })).resolves.toMatchObject({
+      status: "no_match",
+      keyword: "ปูนตราช้าง"
+    });
+  });
 });

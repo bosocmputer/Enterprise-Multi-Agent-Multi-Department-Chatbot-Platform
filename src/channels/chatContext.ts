@@ -1,11 +1,16 @@
 import { formatBusinessProfileHelp, phraseForIntent, type BusinessProfile } from "../config/businessProfile.js";
+import { formatMultipleMatches } from "../core/responseFormatter.js";
 import type { LookupIntent, LookupResult, ProductCandidate } from "../core/types.js";
 import type { CacheService } from "../services/cacheService.js";
 
 export interface ChatContext {
+  candidatePageStart?: number;
   candidates?: ProductCandidate[];
   intent?: LookupIntent;
+  keyword?: string;
   lastProduct?: ProductCandidate;
+  pageSize?: number;
+  totalFound?: number;
 }
 
 export type ContextResolution =
@@ -15,6 +20,7 @@ export type ContextResolution =
 export async function resolveTextWithContext(options: {
   businessProfile: BusinessProfile;
   contextStore?: CacheService;
+  contextTtlSeconds?: number;
   key: string;
   text: string;
 }): Promise<ContextResolution> {
@@ -24,23 +30,40 @@ export async function resolveTextWithContext(options: {
   }
 
   const context = await options.contextStore?.get<ChatContext>(options.key);
+  if (isMoreResultsText(normalized)) {
+    return resolveMoreResults({
+      businessProfile: options.businessProfile,
+      context,
+      contextStore: options.contextStore,
+      key: options.key,
+      ttlSeconds: options.contextTtlSeconds ?? 300
+    });
+  }
+
   const numericSelection = parseNumericSelection(normalized);
   if (numericSelection != null) {
     if (!context?.candidates?.length) {
       return {
         kind: "reply",
-        text: "รายการที่ให้เลือกหมดอายุแล้ว กรุณาค้นหาสินค้าใหม่อีกครั้ง"
+        text: options.businessProfile.replyStyle.noContextPrompt
       };
     }
-    if (!context.candidates[numericSelection]) {
+    const pageStart = context.candidatePageStart ?? 0;
+    const pageSize = context.pageSize ?? 5;
+    const visibleCount = Math.min(pageSize, Math.max(0, context.candidates.length - pageStart));
+    if (numericSelection < 0 || numericSelection >= visibleCount) {
       return {
         kind: "reply",
-        text: `กรุณาเลือกเลข 1-${context.candidates.length} หรือส่งรหัสสินค้า`
+        text: `กรุณาเลือกเลข 1-${visibleCount || 1} หรือส่งรหัสสินค้า`
       };
+    }
+    const selected = context.candidates[pageStart + numericSelection];
+    if (!selected) {
+      return { kind: "reply", text: options.businessProfile.replyStyle.noContextPrompt };
     }
     return {
       kind: "lookup",
-      text: `${context.candidates[numericSelection].code} ${intentPrompt(context.intent, options.businessProfile)}`
+      text: `${selected.code} ${intentPrompt(context.intent, options.businessProfile)}`
     };
   }
 
@@ -94,8 +117,12 @@ export async function saveLookupContext(options: {
     await options.contextStore.set<ChatContext>(
       options.key,
       {
-        candidates: options.result.candidates.slice(0, 5),
-        intent: normalizeContextIntent(options.result.intent)
+        candidatePageStart: options.result.pageStart ?? 0,
+        candidates: options.result.candidates,
+        intent: normalizeContextIntent(options.result.intent),
+        keyword: options.result.keyword,
+        pageSize: options.result.pageSize ?? 5,
+        totalFound: options.result.totalFound
       },
       options.ttlSeconds
     );
@@ -158,6 +185,53 @@ function parseNumericSelection(text: string): number | undefined {
   return Number.isInteger(value) ? value - 1 : undefined;
 }
 
+function isMoreResultsText(text: string): boolean {
+  return /^(เพิ่ม|ดูเพิ่ม|ต่อ|next|more)$/i.test(text.trim());
+}
+
+async function resolveMoreResults(options: {
+  businessProfile: BusinessProfile;
+  context?: ChatContext;
+  contextStore?: CacheService;
+  key: string;
+  ttlSeconds: number;
+}): Promise<ContextResolution> {
+  if (!options.context?.candidates?.length) {
+    return { kind: "reply", text: options.businessProfile.replyStyle.noContextPrompt };
+  }
+
+  const pageSize = options.context.pageSize ?? 5;
+  const currentStart = options.context.candidatePageStart ?? 0;
+  const nextStart = currentStart + pageSize;
+  if (nextStart >= options.context.candidates.length) {
+    return {
+      kind: "reply",
+      text: options.businessProfile.replyStyle.noMoreResultsPrompt
+    };
+  }
+
+  const updatedContext: ChatContext = {
+    ...options.context,
+    candidatePageStart: nextStart,
+    pageSize
+  };
+  await options.contextStore?.set(options.key, updatedContext, options.ttlSeconds);
+
+  return {
+    kind: "reply",
+    text: formatMultipleMatches({
+      candidates: updatedContext.candidates ?? [],
+      hasMore: nextStart + pageSize < (updatedContext.candidates?.length ?? 0),
+      intent: updatedContext.intent ?? "stock_price",
+      keyword: updatedContext.keyword ?? "รายการล่าสุด",
+      pageSize,
+      pageStart: nextStart,
+      profile: options.businessProfile,
+      totalFound: updatedContext.totalFound
+    })
+  };
+}
+
 function parseExactCode(text: string): string | undefined {
   const normalized = text.trim();
   return /^[A-Z0-9][A-Z0-9_-]{2,}$/i.test(normalized) ? normalized : undefined;
@@ -172,9 +246,10 @@ function resolveContextRequiredPhrase(options: {
 }): ContextResolution {
   if (options.type === "selection_constraint") {
     if (options.context?.candidates?.length) {
+      const visibleCount = visibleCandidateCount(options.context);
       return {
         kind: "reply",
-        text: `ตอนนี้ยังเลือกสินค้าจากคำว่า "${options.marker}" อัตโนมัติไม่ได้ กรุณาเลือกเลข 1-${options.context.candidates.length} จากรายการล่าสุด หรือส่งรหัสสินค้า`
+        text: `ตอนนี้ยังเลือกสินค้าจากคำว่า "${options.marker}" อัตโนมัติไม่ได้ กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่งรหัสสินค้า`
       };
     }
     return {
@@ -191,15 +266,22 @@ function resolveContextRequiredPhrase(options: {
     };
   }
   if (options.context?.candidates?.length) {
+    const visibleCount = visibleCandidateCount(options.context);
     return {
       kind: "reply",
-      text: `ยังไม่รู้ว่า "${options.marker}" คือรายการไหน กรุณาเลือกเลข 1-${options.context.candidates.length} จากรายการล่าสุด หรือส่งรหัสสินค้า`
+      text: `ยังไม่รู้ว่า "${options.marker}" คือรายการไหน กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่งรหัสสินค้า`
     };
   }
   return {
     kind: "reply",
-    text: "ยังไม่รู้ว่าสินค้าตัวไหน กรุณาส่งรหัสสินค้า ชื่อสินค้า หรือค้นหาสินค้าก่อน"
+    text: options.businessProfile.replyStyle.noContextPrompt
   };
+}
+
+function visibleCandidateCount(context: ChatContext): number {
+  const pageStart = context.candidatePageStart ?? 0;
+  const pageSize = context.pageSize ?? 5;
+  return Math.min(pageSize, Math.max(0, (context.candidates?.length ?? 0) - pageStart));
 }
 
 function detectContextRequiredPhrase(

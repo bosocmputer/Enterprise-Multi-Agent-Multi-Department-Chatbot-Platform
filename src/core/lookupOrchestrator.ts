@@ -6,7 +6,18 @@ import type { CacheService, DedupStore } from "../services/cacheService.js";
 import type { LlmParserMode, LookupLlmParser } from "./llmParser.js";
 import { runLlmParseWithTelemetry } from "./llmParser.js";
 import { understandLookupQuery } from "./queryUnderstanding.js";
-import type { LookupRequest, LookupResult, ProductCandidate } from "./types.js";
+import type { LookupRequest, LookupResult, ParseOutcome, ProductCandidate, ProductSearchResult } from "./types.js";
+
+const SEARCH_RESULT_LIMIT = 20;
+const MULTI_MATCH_PAGE_SIZE = 5;
+
+type ParsedLookup = Extract<ParseOutcome, { status: "parsed" }>;
+
+interface CandidateSearchResult {
+  candidates: ProductCandidate[];
+  returned?: number;
+  totalFound?: number;
+}
 
 export interface LookupOrchestratorOptions {
   businessProfile: BusinessProfile;
@@ -51,7 +62,7 @@ export class LookupOrchestrator {
   private readonly tenantStatus: "demo" | "real";
 
   async lookup(request: LookupRequest, telemetry: LookupTelemetryOptions = {}): Promise<LookupResult> {
-    const parsed = await understandLookupQuery(request.text, this.businessProfile, {
+    let parsed = await understandLookupQuery(request.text, this.businessProfile, {
       llmParser: this.llmParser,
       llmParserMode: this.llmParserMode,
       logger: telemetry.logger,
@@ -63,31 +74,29 @@ export class LookupOrchestrator {
     }
 
     try {
-      const candidates = parsed.isExactCode
-        ? [{ code: parsed.keyword, name: parsed.keyword }]
+      let searchResult = parsed.isExactCode
+        ? { candidates: [{ code: parsed.keyword, name: parsed.keyword }], returned: 1, totalFound: 1 }
         : await this.searchProductsByTerms(parsed.searchTerms);
+      let candidates = searchResult.candidates;
 
       if (candidates.length === 0) {
-        this.triggerShadowParse(request.text, telemetry);
-        return { status: "no_match", intent: parsed.intent, keyword: parsed.keyword };
+        const assisted = await this.retryNoMatchWithAssist(request.text, parsed, telemetry);
+        if (assisted) {
+          parsed = assisted.parsed;
+          searchResult = assisted.searchResult;
+          candidates = searchResult.candidates;
+        } else {
+          this.triggerShadowParse(request.text, telemetry);
+          return { status: "no_match", intent: parsed.intent, keyword: parsed.keyword };
+        }
       }
 
       if (!parsed.isExactCode && candidates.length > 1) {
-        return {
-          status: "multiple_matches",
-          intent: parsed.intent,
-          keyword: parsed.keyword,
-          candidates: candidates.slice(0, 5)
-        };
+        return multipleMatches(parsed, searchResult);
       }
 
       if (parsed.intent === "search_product") {
-        return {
-          status: "multiple_matches",
-          intent: parsed.intent,
-          keyword: parsed.keyword,
-          candidates: candidates.slice(0, 5)
-        };
+        return multipleMatches(parsed, searchResult);
       }
 
       const product = candidates[0] as ProductCandidate;
@@ -150,29 +159,80 @@ export class LookupOrchestrator {
     }
   }
 
-  private async searchProductsByTerms(searchTerms: string[]): Promise<ProductCandidate[]> {
+  private async searchProductsByTerms(searchTerms: string[]): Promise<CandidateSearchResult> {
     for (const term of searchTerms) {
-      const candidates = await this.searchProducts(term);
-      const relevantCandidates = candidates.filter((candidate) => productMatchesSearchTerm(candidate, term));
-      if (relevantCandidates.length > 0) return relevantCandidates;
+      const result = await this.searchProducts(term);
+      const relevantCandidates = result.products.filter((candidate) => productMatchesSearchTerm(candidate, term));
+      if (relevantCandidates.length > 0) {
+        const keptAllReturnedProducts = relevantCandidates.length === result.products.length;
+        return {
+          candidates: relevantCandidates,
+          returned: keptAllReturnedProducts ? result.returned : relevantCandidates.length,
+          totalFound: keptAllReturnedProducts ? result.totalFound : relevantCandidates.length
+        };
+      }
     }
-    return [];
+    return { candidates: [] };
   }
 
-  private async searchProducts(keyword: string): Promise<ProductCandidate[]> {
-    const key = `sml:search:${normalizeCacheKey(keyword)}`;
-    const cached = await this.cache.get<ProductCandidate[]>(key);
-    if (cached) return cached;
+  private async searchProducts(keyword: string): Promise<ProductSearchResult> {
+    const key = `sml:search:v2:${normalizeCacheKey(keyword)}`;
+    const cached = await this.cache.get<ProductSearchResult | ProductCandidate[]>(key);
+    if (cached) return normalizeCachedSearchResult(cached);
 
-    return this.fetchWithStampedeGuard(key, this.searchCacheTtlSeconds, () => this.smlClient.searchProduct(keyword, 5));
+    return this.fetchWithStampedeGuard(key, this.searchCacheTtlSeconds, () => this.fetchProductSearch(keyword));
   }
 
   private async findExactProduct(code: string): Promise<ProductCandidate | undefined> {
-    const products = await this.searchProducts(code);
+    const { products } = await this.searchProducts(code);
     return (
       products.find((product) => product.code.toLowerCase() === code.toLowerCase()) ??
       products[0]
     );
+  }
+
+  private async fetchProductSearch(keyword: string): Promise<ProductSearchResult> {
+    const clientWithMeta = this.smlClient as SmlClient & {
+      searchProductWithMeta?: (keyword: string, limit?: number) => Promise<ProductSearchResult>;
+    };
+    if (typeof clientWithMeta.searchProductWithMeta === "function") {
+      return clientWithMeta.searchProductWithMeta(keyword, SEARCH_RESULT_LIMIT);
+    }
+    const products = await this.smlClient.searchProduct(keyword, SEARCH_RESULT_LIMIT);
+    return { products, returned: products.length, totalFound: products.length };
+  }
+
+  private async retryNoMatchWithAssist(
+    text: string,
+    parsed: ParsedLookup,
+    telemetry: LookupTelemetryOptions
+  ): Promise<{ parsed: ParsedLookup; searchResult: CandidateSearchResult } | undefined> {
+    if (this.llmParserMode !== "assist" || !this.llmParser || parsed.source === "llm") return undefined;
+
+    const llmParsed = await runLlmParseWithTelemetry(this.llmParser, text, {
+      logger: telemetry.logger,
+      metrics: telemetry.metrics,
+      mode: "assist"
+    }).catch((error) => {
+      telemetry.logger?.warn({ error }, "llm assist parser failed");
+      return undefined;
+    });
+    if (!llmParsed || llmParsed.status !== "parsed" || llmParsed.intent === "unsupported") return undefined;
+    if (!this.businessProfile.enabledIntents.includes(llmParsed.intent)) return undefined;
+
+    const assistedParsed: ParsedLookup = {
+      status: "parsed",
+      intent: llmParsed.intent,
+      keyword: llmParsed.keyword,
+      isExactCode: exactCodePattern.test(llmParsed.keyword),
+      searchTerms: llmParsed.searchTerms,
+      source: "llm"
+    };
+    const searchResult = assistedParsed.isExactCode
+      ? { candidates: [{ code: assistedParsed.keyword, name: assistedParsed.keyword }], returned: 1, totalFound: 1 }
+      : await this.searchProductsByTerms(assistedParsed.searchTerms);
+    if (searchResult.candidates.length === 0) return undefined;
+    return { parsed: assistedParsed, searchResult };
   }
 
   private async getCachedStock(code: string) {
@@ -228,6 +288,31 @@ export class LookupOrchestrator {
     });
   }
 }
+
+function multipleMatches(parsed: ParsedLookup, searchResult: CandidateSearchResult): LookupResult {
+  const totalFound = searchResult.totalFound ?? searchResult.candidates.length;
+  const pageSize = MULTI_MATCH_PAGE_SIZE;
+  return {
+    status: "multiple_matches",
+    intent: parsed.intent,
+    keyword: parsed.keyword,
+    candidates: searchResult.candidates,
+    hasMore: searchResult.candidates.length > pageSize,
+    pageSize,
+    pageStart: 0,
+    returned: searchResult.returned ?? searchResult.candidates.length,
+    totalFound
+  };
+}
+
+function normalizeCachedSearchResult(value: ProductSearchResult | ProductCandidate[]): ProductSearchResult {
+  if (Array.isArray(value)) {
+    return { products: value, returned: value.length, totalFound: value.length };
+  }
+  return value;
+}
+
+const exactCodePattern = /^[A-Z0-9][A-Z0-9_-]{2,}$/i;
 
 function normalizeCacheKey(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");

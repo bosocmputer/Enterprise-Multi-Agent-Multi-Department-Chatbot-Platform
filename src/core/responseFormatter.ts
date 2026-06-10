@@ -1,5 +1,7 @@
 import { formatBusinessProfileHelp, type BusinessProfile } from "../config/businessProfile.js";
-import type { LookupResult, PriceLine, StockLine } from "./types.js";
+import type { LookupIntent, LookupResult, PriceLine, ProductCandidate, StockLine } from "./types.js";
+
+const DEFAULT_PAGE_SIZE = 5;
 
 export function formatLookupReply(result: LookupResult, profile?: BusinessProfile): string {
   switch (result.status) {
@@ -14,13 +16,18 @@ export function formatLookupReply(result: LookupResult, profile?: BusinessProfil
       if (result.candidates.length === 0) {
         return `ไม่พบตัวเลือกสินค้าที่ชัดเจนจาก "${result.keyword}"`;
       }
-      return [
-        `พบหลายรายการสำหรับ "${result.keyword}"`,
-        ...result.candidates.map((product, index) => `${index + 1}. ${product.code} - ${product.name}`),
-        "ตอบเลข 1-5 หรือรหัสสินค้า เพื่อเลือกรายการ"
-      ].join("\n");
+      return formatMultipleMatches({
+        candidates: result.candidates,
+        hasMore: result.hasMore,
+        intent: result.intent,
+        keyword: result.keyword,
+        pageSize: result.pageSize,
+        pageStart: result.pageStart,
+        profile,
+        totalFound: result.totalFound
+      });
     case "unsupported":
-      return profile ? formatBusinessProfileHelp(profile) : "ตอนนี้รองรับการถาม stock/ราคา";
+      return profile ? formatBusinessProfileHelp(profile) : "ส่งชื่อสินค้า รหัส รุ่น หรือยี่ห้อมาได้เลยครับ";
     case "dependency_error":
       if (result.reason === "sml_timeout") {
         return "ระบบ SML ตอบช้าเกินไป กรุณาลองใหม่อีกครั้ง";
@@ -30,6 +37,37 @@ export function formatLookupReply(result: LookupResult, profile?: BusinessProfil
       }
       return "ตอนนี้ดึงข้อมูลสินค้าไม่ได้ กรุณาลองใหม่อีกครั้ง";
   }
+}
+
+export function formatMultipleMatches(options: {
+  candidates: ProductCandidate[];
+  hasMore?: boolean;
+  intent: LookupIntent;
+  keyword: string;
+  pageSize?: number;
+  pageStart?: number;
+  profile?: BusinessProfile;
+  totalFound?: number;
+}): string {
+  const pageSize = Math.max(1, options.pageSize ?? DEFAULT_PAGE_SIZE);
+  const pageStart = Math.max(0, options.pageStart ?? 0);
+  const visible = options.candidates.slice(pageStart, pageStart + pageSize);
+  const shownEnd = pageStart + visible.length;
+  const totalFound = options.totalFound ?? options.candidates.length;
+  const hasMore = options.hasMore ?? (shownEnd < options.candidates.length || shownEnd < totalFound);
+  const rangeText =
+    totalFound > visible.length || pageStart > 0
+      ? ` (แสดง ${pageStart + 1}-${shownEnd}${totalFound ? ` จาก ${totalFound}` : ""})`
+      : "";
+  const prompt = hasMore
+    ? options.profile?.replyStyle.moreResultsPrompt
+    : options.profile?.replyStyle.multiMatchPrompt;
+
+  return [
+    `เจอหลายรายการสำหรับ "${options.keyword}"${rangeText}`,
+    ...visible.map((product, index) => `${index + 1}. ${product.code} - ${product.name}`),
+    prompt ?? "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งรหัสสินค้า/คำค้นที่เจาะจงขึ้น"
+  ].join("\n");
 }
 
 function formatSuccess(result: Extract<LookupResult, { status: "success" }>): string {

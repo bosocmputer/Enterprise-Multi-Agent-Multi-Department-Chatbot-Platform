@@ -149,6 +149,7 @@ export class LineAdapter {
     const resolved = await resolveTextWithContext({
       businessProfile: this.options.businessProfile,
       contextStore: this.options.contextStore,
+      contextTtlSeconds: this.options.contextTtlSeconds ?? 300,
       key: contextKey,
       text: gatedText
     });

@@ -9,7 +9,7 @@ describe("chat context helpers", () => {
   it("asks users to search again when numeric selection context expired", async () => {
     await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "1" })).resolves.toMatchObject({
       kind: "reply",
-      text: expect.stringContaining("หมดอายุ")
+      text: expect.stringContaining("ยังไม่มีรายการล่าสุด")
     });
   });
 
@@ -63,7 +63,55 @@ describe("chat context helpers", () => {
       resolveTextWithContext({ businessProfile: profile, key: "k", text: "ตัวนี้ราคาเท่าไหร่" })
     ).resolves.toMatchObject({
       kind: "reply",
-      text: expect.stringContaining("ยังไม่รู้ว่าสินค้าตัวไหน")
+      text: expect.stringContaining("ยังไม่มีรายการล่าสุด")
+    });
+  });
+
+  it("pages through multiple matches and selects from the latest page", async () => {
+    const store = new MemoryCacheService();
+    const candidates = Array.from({ length: 12 }, (_, index) => ({
+      code: `A${String(index + 1).padStart(3, "0")}`,
+      name: `สินค้า ${index + 1}`
+    }));
+    await saveLookupContext({
+      contextStore: store,
+      key: "k",
+      result: {
+        candidates,
+        hasMore: true,
+        intent: "price",
+        keyword: "สินค้า",
+        pageSize: 5,
+        pageStart: 0,
+        status: "multiple_matches",
+        totalFound: 12
+      },
+      ttlSeconds: 300
+    });
+
+    await expect(
+      resolveTextWithContext({
+        businessProfile: profile,
+        contextStore: store,
+        contextTtlSeconds: 300,
+        key: "k",
+        text: "เพิ่ม"
+      })
+    ).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("แสดง 6-10 จาก 12")
+    });
+
+    await expect(resolveTextWithContext({ businessProfile: profile, contextStore: store, key: "k", text: "1" })).resolves.toEqual({
+      kind: "lookup",
+      text: "A006 ราคา"
+    });
+  });
+
+  it("asks users to search again when more-results context expired", async () => {
+    await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "เพิ่ม" })).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("ยังไม่มีรายการล่าสุด")
     });
   });
 
