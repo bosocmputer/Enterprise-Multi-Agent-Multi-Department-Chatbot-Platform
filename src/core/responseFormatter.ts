@@ -1,22 +1,40 @@
 import { formatBusinessProfileHelp, type BusinessProfile } from "../config/businessProfile.js";
+import { formatAssistFailureMessage, formatAssistSuccessFooter } from "./assistFormatting.js";
 import type { LookupIntent, LookupResult, PriceLine, ProductCandidate, StockLine } from "./types.js";
 
 const DEFAULT_PAGE_SIZE = 5;
 
-export function formatLookupReply(result: LookupResult, profile?: BusinessProfile): string {
+export interface LookupReplyFormatOptions {
+  assistResultFooterEnabled?: boolean;
+  assistShowModel?: boolean;
+}
+
+export function formatLookupReply(
+  result: LookupResult,
+  profile?: BusinessProfile,
+  options: LookupReplyFormatOptions = {}
+): string {
+  if (profile && result.assist?.status === "rejected") {
+    return formatAssistFailureMessage(profile, result.assist, { showModel: options.assistShowModel });
+  }
+
+  let reply: string;
   switch (result.status) {
     case "success":
-      return formatSuccess(result);
+      reply = formatSuccess(result);
+      break;
     case "no_match":
-      return [
+      reply = [
         `ไม่พบสินค้าที่ตรงกับ "${result.keyword}"`,
         profile?.replyStyle.fallbackProductHints ?? "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น"
       ].join("\n");
+      break;
     case "multiple_matches":
       if (result.candidates.length === 0) {
-        return `ไม่พบตัวเลือกสินค้าที่ชัดเจนจาก "${result.keyword}"`;
+        reply = `ไม่พบตัวเลือกสินค้าที่ชัดเจนจาก "${result.keyword}"`;
+        break;
       }
-      return formatMultipleMatches({
+      reply = formatMultipleMatches({
         candidates: result.candidates,
         hasMore: result.hasMore,
         intent: result.intent,
@@ -26,17 +44,27 @@ export function formatLookupReply(result: LookupResult, profile?: BusinessProfil
         profile,
         totalFound: result.totalFound
       });
+      break;
     case "unsupported":
-      return profile ? formatBusinessProfileHelp(profile) : "ส่งชื่อสินค้า รหัส รุ่น หรือยี่ห้อมาได้เลยครับ";
+      reply = profile ? formatBusinessProfileHelp(profile) : "ส่งชื่อสินค้า รหัส รุ่น หรือยี่ห้อมาได้เลยครับ";
+      break;
     case "dependency_error":
       if (result.reason === "sml_timeout") {
-        return "ระบบ SML ตอบช้าเกินไป กรุณาลองใหม่อีกครั้ง";
+        reply = "ระบบ SML ตอบช้าเกินไป กรุณาลองใหม่อีกครั้ง";
+        break;
       }
       if (result.reason === "sml_circuit_open") {
-        return "ระบบ SML มีปัญหาชั่วคราว กรุณาลองใหม่อีกครั้ง";
+        reply = "ระบบ SML มีปัญหาชั่วคราว กรุณาลองใหม่อีกครั้ง";
+        break;
       }
-      return "ตอนนี้ดึงข้อมูลสินค้าไม่ได้ กรุณาลองใหม่อีกครั้ง";
+      reply = "ตอนนี้ดึงข้อมูลสินค้าไม่ได้ กรุณาลองใหม่อีกครั้ง";
+      break;
   }
+
+  if (profile && options.assistResultFooterEnabled !== false && result.assist?.status === "parsed") {
+    return [reply, "", formatAssistSuccessFooter(profile, result.assist, { showModel: options.assistShowModel })].join("\n");
+  }
+  return reply;
 }
 
 export function formatMultipleMatches(options: {

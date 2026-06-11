@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type pino from "pino";
 import type { MetricsRegistry } from "../observability/metrics.js";
 import type { LookupOrchestrator } from "./lookupOrchestrator.js";
-import type { LookupRequest, LookupResult } from "./types.js";
+import type { LlmAssistStartEvent, LookupRequest, LookupResult } from "./types.js";
 
 export async function runLookupWithTelemetry(
   lookup: LookupOrchestrator,
@@ -10,6 +10,7 @@ export async function runLookupWithTelemetry(
   options: {
     logger?: pino.Logger;
     metrics?: MetricsRegistry;
+    onAssistStart?: (event: LlmAssistStartEvent) => void | Promise<void>;
   } = {}
 ): Promise<LookupResult> {
   const startedAt = Date.now();

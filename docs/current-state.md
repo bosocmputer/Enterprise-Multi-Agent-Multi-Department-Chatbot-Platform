@@ -1,6 +1,6 @@
 # Current State
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
 
 ## Latest Handoff
 
@@ -16,11 +16,11 @@ Last updated: 2026-06-10
 - Server/deploy path: `/home/bosscatdog/parts-lookup-chatbot`
 - Pilot URL: `http://192.168.2.109:3060`
 - Local service port: `3060` by default.
-- Implemented app services: Fastify lookup service, SML read-only client, deterministic parser, context guard for vague Thai follow-ups, optional LiteLLM slow-path parser, response formatter, Redis-backed cache/dedup/rate limit/context state, Telegram polling worker, LINE webhook adapter, optional Telegram webhook route behind env flags, Prometheus-style `/metrics`, Telegram ops alerts.
+- Implemented app services: Fastify lookup service, SML read-only client, deterministic parser, context guard for vague Thai follow-ups, optional LiteLLM slow-path parser with assist-mode status UX, response formatter, Redis-backed cache/dedup/rate limit/context state, Telegram polling worker, LINE webhook adapter, optional Telegram webhook route behind env flags, Prometheus-style `/metrics`, Telegram ops alerts.
 - Implemented developer tooling: offline PyThaiNLP Thai query evaluation under `tools/thai-query-eval/` for reviewed/redacted no-match and unsupported examples. It is not part of the Docker app runtime.
 - Deploy services: `parts-lookup-api` and dedicated `parts-lookup-redis` in Docker Compose project/network/volume names prefixed with `parts-lookup`.
 - Implemented profile services: Business Profile v1 schema/file loader with `profiles/construction-demo.json` for real SML construction-materials data at `192.168.2.248:3515`.
-- Deferred app services: database/profile-service backed Business Profile store, broader LLM assist rollout beyond shadow mode, optional BullMQ worker, external metrics collector, real customer SML tenant cutover.
+- Deferred app services: database/profile-service backed Business Profile store, optional BullMQ worker, external metrics collector, real customer SML tenant cutover.
 - External dependency: SML MCP server confirmed at `http://192.168.2.248:3515`.
 - Optional LLM dependency: LiteLLM Swagger/API confirmed at `http://192.168.2.248:4000`; model list currently exposes `openrouter/openrouter/free`.
 
@@ -45,15 +45,15 @@ Last checked from this workstation and deploy server `192.168.2.109`:
 - Goal: build a read-only chatbot where staff can ask stock and price questions in Telegram and LINE without hardcoding business-specific vocabulary in source code.
 - In progress: Telegram real-bot pilot is enabled; LINE code is ready but disabled until credentials and dedicated tunnel are configured.
 - Blocked: auto-parts customer data is not connected yet; current real SML data at `192.168.2.248:3515` is construction-materials data.
-- Next safest implementation step: deploy the context-guard/runtime UX improvement, smoke Telegram with real messages, keep LiteLLM in shadow, and collect another batch of no-match/unsupported examples before considering assist mode.
+- Next safest implementation step: deploy LiteLLM assist status UX, smoke Telegram with clear and ambiguous messages, and tune assist timeout/status noise from real staff-style examples.
 
 ## Known Gaps
 
 - Application code: pilot runtime exists under `src/`.
-- Testing: latest local run passed `60` Vitest tests and `npm run build`.
+- Testing: latest local run passed `80` Vitest tests and `npm run build`.
 - Server smoke: latest app deploy passed `GET /health`, unauthenticated internal endpoint rejection, authenticated `/metrics`, Redis readiness, and safe SML fallback; authenticated `/ready` is currently degraded because SML MCP is unavailable.
 - Telegram pilot bot username: `employee_assistant_248_bot`.
 - SML: least-privileged role, correct tenant/product dataset, timeout behavior, and search quality need verification.
 - Security: SML tool allowlist is read-only; LINE/Telegram/internal/tunnel secrets must stay in untracked `.env`; production internal endpoints require bearer auth.
 - Performance: cache TTLs, SML timeout budgets, Business Profile lookup, and exact/fuzzy lookup strategy need validation with real product queries.
-- UX: no-match, multi-match, invalid/expired numeric selection, numeric selection after multi-match, exact-code display name enrichment, timeout, unsupported/help message, duplicate update, private message, group mention/prefix, and group no-mention behavior are implemented/tested.
+- UX: no-match, paged multi-match, invalid/expired numeric selection, numeric selection after multi-match, exact-code display name enrichment, timeout, unsupported/help message, LiteLLM assist status/footer/failure copy, duplicate update, private message, group mention/prefix, and group no-mention behavior are implemented/tested.

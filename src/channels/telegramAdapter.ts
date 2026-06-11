@@ -3,10 +3,12 @@ import { z } from "zod";
 import { alertOnLookupDependencyError, type AlertSender } from "./channelAlerts.js";
 import { resolveTextWithContext, saveLookupContext } from "./chatContext.js";
 import type { BusinessProfile } from "../config/businessProfile.js";
+import { formatAssistStartingMessage } from "../core/assistFormatting.js";
 import type { LlmParserMode, LookupLlmParser } from "../core/llmParser.js";
 import type { LookupOrchestrator } from "../core/lookupOrchestrator.js";
 import { runLookupWithTelemetry } from "../core/lookupTelemetry.js";
 import { formatLookupReply } from "../core/responseFormatter.js";
+import type { LlmAssistStartEvent } from "../core/types.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
 import type { CacheService, DedupStore, RateLimiter } from "../services/cacheService.js";
 
@@ -43,6 +45,10 @@ const telegramUpdateSchema = z
   .passthrough();
 
 export interface TelegramAdapterOptions {
+  assistResultFooterEnabled?: boolean;
+  assistStatusMinDelayMs?: number;
+  assistUserStatusEnabled?: boolean;
+  assistUserStatusShowModel?: boolean;
   botToken: string;
   businessProfile: BusinessProfile;
   alerts?: AlertSender;
@@ -119,6 +125,8 @@ export class TelegramAdapter {
     }
 
     const contextKey = this.contextKey(message);
+    const chatId = String(message.chat.id);
+    const assistStatus = this.createAssistStatusController(chatId, message.message_id);
     const resolved = await resolveTextWithContext({
       businessProfile: this.options.businessProfile,
       contextStore: this.options.contextStore,
@@ -137,11 +145,16 @@ export class TelegramAdapter {
       {
         text: resolved.text,
         channel: "telegram",
-        chatId: String(message.chat.id),
+        chatId,
         userId: message.from?.id ? String(message.from.id) : undefined
       },
-      { logger: this.options.logger, metrics: this.options.metrics }
+      {
+        logger: this.options.logger,
+        metrics: this.options.metrics,
+        onAssistStart: assistStatus.onAssistStart
+      }
     );
+    await assistStatus.finish();
 
     await saveLookupContext({
       contextStore: this.options.contextStore,
@@ -149,7 +162,14 @@ export class TelegramAdapter {
       result,
       ttlSeconds: this.options.contextTtlSeconds ?? 300
     });
-    await this.sendMessage(String(message.chat.id), formatLookupReply(result, this.options.businessProfile), message.message_id);
+    await this.sendMessage(
+      chatId,
+      formatLookupReply(result, this.options.businessProfile, {
+        assistResultFooterEnabled: this.options.assistResultFooterEnabled,
+        assistShowModel: this.options.assistUserStatusShowModel
+      }),
+      message.message_id
+    );
     await alertOnLookupDependencyError(this.options.alerts, "telegram", result);
     this.options.metrics?.recordTelegramUpdate("handled");
     return { ignored: false, updateId: update.update_id };
@@ -223,6 +243,66 @@ export class TelegramAdapter {
       await this.options.alerts?.send("telegram_reply_failed", `Telegram reply failed with HTTP ${response.status}`);
       throw new Error(`Telegram sendMessage failed with HTTP ${response.status}`);
     }
+  }
+
+  private async sendChatAction(chatId: string, action: "typing"): Promise<void> {
+    const url = `https://api.telegram.org/bot${this.options.botToken}/sendChatAction`;
+    const response = await this.fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action,
+        chat_id: chatId
+      })
+    });
+
+    if (!response.ok) {
+      this.options.logger?.warn({ status: response.status }, "Telegram sendChatAction failed");
+    }
+  }
+
+  private createAssistStatusController(chatId: string, replyToMessageId?: number): {
+    finish: () => Promise<void>;
+    onAssistStart: (event: LlmAssistStartEvent) => void;
+  } {
+    let started = false;
+    let sent = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pendingSend: Promise<void> = Promise.resolve();
+
+    const sendStatus = (event: LlmAssistStartEvent) => {
+      if (sent) return;
+      sent = true;
+      const text = formatAssistStartingMessage(this.options.businessProfile, event, {
+        showModel: this.options.assistUserStatusShowModel
+      });
+      pendingSend = this.sendMessage(chatId, text, replyToMessageId).catch((error) => {
+        this.options.logger?.warn({ error }, "Telegram assist status send failed");
+      });
+    };
+
+    return {
+      finish: async () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        await pendingSend;
+      },
+      onAssistStart: (event: LlmAssistStartEvent) => {
+        if (!this.options.assistUserStatusEnabled || started) return;
+        started = true;
+        void this.sendChatAction(chatId, "typing").catch((error) => {
+          this.options.logger?.warn({ error }, "Telegram typing action failed");
+        });
+        const delayMs = Math.max(0, this.options.assistStatusMinDelayMs ?? 800);
+        if (delayMs === 0) {
+          sendStatus(event);
+          return;
+        }
+        timer = setTimeout(() => sendStatus(event), delayMs);
+      }
+    };
   }
 
   private contextKey(message: z.infer<typeof telegramMessageSchema>): string {

@@ -86,6 +86,28 @@ const envSchema = z
     ALERT_TELEGRAM_BOT_TOKEN: z.string().optional(),
     OPS_TELEGRAM_CHAT_ID: z.string().optional(),
     ALERT_DEDUP_TTL_SECONDS: numberFromEnv(300),
+    ASSIST_RESULT_FOOTER_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => {
+        if (value == null || value === "") return true;
+        return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+      }),
+    ASSIST_STATUS_MIN_DELAY_MS: numberFromEnv(800),
+    ASSIST_USER_STATUS_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => {
+        if (value == null || value === "") return true;
+        return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+      }),
+    ASSIST_USER_STATUS_SHOW_MODEL: z
+      .string()
+      .optional()
+      .transform((value) => {
+        if (value == null || value === "") return true;
+        return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+      }),
     LINE_ENABLED: booleanFromEnv,
     LINE_CHANNEL_SECRET: z.string().optional(),
     LINE_CHANNEL_ACCESS_TOKEN: z.string().optional(),
@@ -98,7 +120,7 @@ const envSchema = z
     LITELLM_MODEL: z.string().default("openrouter/openrouter/free"),
     OPENAI_API_KEY: optionalStringFromEnv,
     OPENAI_BASE_URL: optionalUrlFromEnv,
-    LLM_PARSER_TIMEOUT_MS: numberFromEnv(7000),
+    LLM_PARSER_TIMEOUT_MS: numberFromEnv(6000),
     LLM_MIN_CONFIDENCE: numberFromEnv(0.75),
     TELEGRAM_CONTEXT_TTL_SECONDS: numberFromEnv(300),
     TELEGRAM_DEDUP_TTL_SECONDS: numberFromEnv(900),
@@ -175,6 +197,13 @@ const envSchema = z
         code: "custom",
         path: ["LLM_PARSER_TIMEOUT_MS"],
         message: "LLM_PARSER_TIMEOUT_MS must be greater than 0"
+      });
+    }
+    if (env.ASSIST_STATUS_MIN_DELAY_MS < 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ASSIST_STATUS_MIN_DELAY_MS"],
+        message: "ASSIST_STATUS_MIN_DELAY_MS must be greater than or equal to 0"
       });
     }
   });

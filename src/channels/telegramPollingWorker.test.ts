@@ -7,6 +7,7 @@ import { MemoryCacheService } from "../services/cacheService.js";
 import type { AlertSender } from "./channelAlerts.js";
 import { TelegramAdapter } from "./telegramAdapter.js";
 import { TelegramPollingWorker } from "./telegramPollingWorker.js";
+import type { LookupLlmParser } from "../core/llmParser.js";
 
 const profile = loadBusinessProfile("profiles/construction-demo.json");
 
@@ -242,5 +243,230 @@ describe("TelegramPollingWorker", () => {
           "Lookup dependency error on telegram: sml_error. Staff received the safe fallback; check SML MCP/readiness."
       }
     ]);
+  });
+
+  it("sends assist typing/status once before a slow-path final reply", async () => {
+    const state = new MemoryCacheService();
+    const sentMessages: Array<{ text: string }> = [];
+    const actions: Array<{ action: string }> = [];
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => ({ model: "openrouter/openrouter/free", reason: "timeout", status: "rejected" })
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => []
+      } as unknown as SmlClient,
+      state,
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/getUpdates")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: [
+              {
+                update_id: 200,
+                message: {
+                  message_id: 300,
+                  text: "มีปูนตราช้างเหลือไหม",
+                  chat: { id: 100, type: "private" },
+                  from: { id: 1, is_bot: false }
+                }
+              }
+            ]
+          })
+        );
+      }
+      if (url.includes("/sendChatAction")) {
+        actions.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      if (url.includes("/sendMessage")) {
+        sentMessages.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const adapter = new TelegramAdapter({
+      assistResultFooterEnabled: true,
+      assistStatusMinDelayMs: 0,
+      assistUserStatusEnabled: true,
+      assistUserStatusShowModel: true,
+      botToken: "test-token",
+      businessProfile: profile,
+      contextStore: state,
+      dedupStore: state,
+      fetchImpl
+    });
+    const worker = new TelegramPollingWorker(adapter, lookup, {
+      intervalMs: 1,
+      timeoutSeconds: 0,
+      logger: createLogger({ LOG_LEVEL: "silent" })
+    });
+
+    await expect(worker.pollOnce()).resolves.toEqual({ received: 1, handled: 1, ignored: 0 });
+    expect(actions).toEqual([{ action: "typing", chat_id: "100" }]);
+    expect(sentMessages).toHaveLength(2);
+    expect(sentMessages[0]?.text).toContain("กำลังใช้ LiteLLM assist model openrouter/openrouter/free");
+    expect(sentMessages[1]?.text).toContain("ตีความไม่สำเร็จ");
+    expect(sentMessages[1]?.text).toContain("rejected_timeout");
+  });
+
+  it("does not send assist status for clear fast-path queries", async () => {
+    const state = new MemoryCacheService();
+    const sentMessages: Array<{ text: string }> = [];
+    let actionCalls = 0;
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        llmCalls += 1;
+        return { model: "openrouter/openrouter/free", reason: "timeout", status: "rejected" };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => [
+          { code: "A001", name: "น้ำมันสินค้า A" },
+          { code: "A002", name: "น้ำมันสินค้า B" }
+        ]
+      } as unknown as SmlClient,
+      state,
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/getUpdates")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: [
+              {
+                update_id: 201,
+                message: {
+                  message_id: 301,
+                  text: "น้ำมัน ราคา",
+                  chat: { id: 100, type: "private" },
+                  from: { id: 1, is_bot: false }
+                }
+              }
+            ]
+          })
+        );
+      }
+      if (url.includes("/sendChatAction")) {
+        actionCalls += 1;
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      if (url.includes("/sendMessage")) {
+        sentMessages.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const adapter = new TelegramAdapter({
+      assistStatusMinDelayMs: 0,
+      assistUserStatusEnabled: true,
+      botToken: "test-token",
+      businessProfile: profile,
+      contextStore: state,
+      fetchImpl
+    });
+    const worker = new TelegramPollingWorker(adapter, lookup, {
+      intervalMs: 1,
+      timeoutSeconds: 0,
+      logger: createLogger({ LOG_LEVEL: "silent" })
+    });
+
+    await expect(worker.pollOnce()).resolves.toEqual({ received: 1, handled: 1, ignored: 0 });
+    expect(actionCalls).toBe(0);
+    expect(llmCalls).toBe(0);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.text).toContain("เจอหลายรายการ");
+  });
+
+  it("suppresses the assist status message when assist finishes before the delay", async () => {
+    const state = new MemoryCacheService();
+    const sentMessages: Array<{ text: string }> = [];
+    const actions: Array<{ action: string }> = [];
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => ({
+        confidence: 0.96,
+        intent: "stock",
+        keyword: "A001",
+        model: "openrouter/openrouter/free",
+        searchTerms: ["A001"],
+        status: "parsed"
+      })
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        getStockBalance: async () => [{ qty: 7, unit: "ชิ้น", warehouse: "WH-01" }]
+      } as unknown as SmlClient,
+      state,
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/getUpdates")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: [
+              {
+                update_id: 202,
+                message: {
+                  message_id: 302,
+                  text: "เช็คตัวลึกลับให้หน่อย",
+                  chat: { id: 100, type: "private" },
+                  from: { id: 1, is_bot: false }
+                }
+              }
+            ]
+          })
+        );
+      }
+      if (url.includes("/sendChatAction")) {
+        actions.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      if (url.includes("/sendMessage")) {
+        sentMessages.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const adapter = new TelegramAdapter({
+      assistResultFooterEnabled: true,
+      assistStatusMinDelayMs: 1000,
+      assistUserStatusEnabled: true,
+      assistUserStatusShowModel: true,
+      botToken: "test-token",
+      businessProfile: profile,
+      contextStore: state,
+      dedupStore: state,
+      fetchImpl
+    });
+    const worker = new TelegramPollingWorker(adapter, lookup, {
+      intervalMs: 1,
+      timeoutSeconds: 0,
+      logger: createLogger({ LOG_LEVEL: "silent" })
+    });
+
+    await expect(worker.pollOnce()).resolves.toEqual({ received: 1, handled: 1, ignored: 0 });
+    expect(actions).toEqual([{ action: "typing", chat_id: "100" }]);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.text).not.toContain("กำลังใช้ LiteLLM assist");
+    expect(sentMessages[0]?.text).toContain("Assist: LiteLLM openrouter/openrouter/free");
   });
 });

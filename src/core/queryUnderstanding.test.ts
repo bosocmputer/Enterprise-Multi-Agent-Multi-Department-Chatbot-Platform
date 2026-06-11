@@ -9,6 +9,7 @@ describe("understandLookupQuery", () => {
   it("does not call LLM when deterministic parser succeeds", async () => {
     let calls = 0;
     const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
       parse: async () => {
         calls += 1;
         return { reason: "provider_error", status: "rejected" };
@@ -30,6 +31,7 @@ describe("understandLookupQuery", () => {
 
   it("uses LLM in assist mode only when deterministic parser is unsupported", async () => {
     const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
       parse: async () => ({
         aliases: ["ปูน ช้าง"],
         confidence: 0.98,
@@ -55,6 +57,7 @@ describe("understandLookupQuery", () => {
 
   it("falls back to unsupported when LLM is rejected", async () => {
     const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
       parse: async () => ({ reason: "low_confidence", status: "rejected" })
     };
 
@@ -67,5 +70,34 @@ describe("understandLookupQuery", () => {
       status: "unsupported",
       reason: "intent_not_found"
     });
+  });
+
+  it("emits assist start metadata when deterministic parsing is unsupported", async () => {
+    const starts: unknown[] = [];
+    const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => ({ model: "openrouter/openrouter/free", reason: "timeout", status: "rejected" })
+    };
+
+    await expect(
+      understandLookupQuery("ปูนตราช้าง", profile, {
+        llmParser: parser,
+        llmParserMode: "assist",
+        onAssistStart: (event) => {
+          starts.push(event);
+        }
+      })
+    ).resolves.toMatchObject({
+      assist: {
+        model: "openrouter/openrouter/free",
+        outcome: "rejected_timeout",
+        reason: "unsupported",
+        status: "rejected"
+      },
+      status: "unsupported"
+    });
+    expect(starts).toEqual([
+      { model: "openrouter/openrouter/free", provider: "litellm", reason: "unsupported", timeoutMs: 6000 }
+    ]);
   });
 });

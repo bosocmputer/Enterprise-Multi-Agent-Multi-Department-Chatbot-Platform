@@ -14,6 +14,11 @@ export function createLlmParser(config: AppConfig, profile: BusinessProfile): Lo
       model: config.LITELLM_MODEL,
       timeoutMs: config.LLM_PARSER_TIMEOUT_MS
     }),
+    metadata: {
+      model: config.LITELLM_MODEL,
+      provider: config.LLM_PROVIDER,
+      timeoutMs: config.LLM_PARSER_TIMEOUT_MS
+    },
     minConfidence: config.LLM_MIN_CONFIDENCE,
     profile
   });

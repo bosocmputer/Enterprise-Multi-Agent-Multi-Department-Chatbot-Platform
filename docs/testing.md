@@ -18,7 +18,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 | --- | --- |
 | Business Profile | schema validation, missing profile, disabled intent, tenant examples, alias expansion, invalid profile rollback behavior. |
 | Query parser/understanding | stock, price, stock+price, search-only, unsupported text, Thai/English variants from Business Profile, product code, barcode-like input, context-only follow-up. |
-| LLM slow-path parser | LiteLLM request shape, JSON-only parser output, malformed JSON, wrong enum, empty keyword, low confidence, timeout, shadow mode no user-facing change. |
+| LLM slow-path parser | LiteLLM request shape, JSON-only parser output, malformed JSON, wrong enum, empty keyword/searchTerms, low confidence, timeout, truncated completion, shadow mode no user-facing change, assist status/footer/failure copy. |
 | Thai query evaluation | PyThaiNLP tokenization fixture, custom dictionary from Business Profile aliases/examples, sensitive-key rejection, context-required phrase suggestions. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
 | Dedup | duplicate webhook event sends at most one reply. |
@@ -27,9 +27,9 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 | Formatter | no match, multi match, success with stock only, success with price only, timeout fallback. |
 | Redaction | logs do not include tokens, raw secrets, or large raw SML payloads. |
 
-Latest local run on 2026-06-10:
+Latest local run on 2026-06-11:
 
-- `npm test`: 14 files, 60 tests passed.
+- `npm test`: 15 files, 80 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -62,7 +62,9 @@ Current covered cases:
 - SML timeout/failure/circuit-open path returns a safe fallback through orchestrator tests.
 - Alert dedup prevents repeated ops-chat messages for the same alert key.
 - Business Profile v1 validates `profiles/construction-demo.json` and drives parser phrases, aliases, help examples, and fallback hints.
-- LiteLLM parser validates JSON output, rejects hallucinated intent enums, rejects low confidence/empty keyword/timeouts, and records parser metrics.
+- LiteLLM parser validates JSON output, rejects hallucinated intent enums, rejects low confidence/empty keyword/empty search terms/timeouts/truncated completions, and records parser metrics.
+- Telegram assist status sends at most one typing/status message for slow-path assist and does not send one for clear fast-path lookups.
+- LINE assist status starts loading animation only for one-on-one slow-path assist.
 - `/internal/parse` requires internal bearer auth and returns parser output without calling SML.
 - Offline Thai query evaluation fixture exists for `มีปูนตราช้างเหลือไหม`, `ปูนตราช้าง`, `เอาแบบถูกสุดมีไหม`, `ตัวนี้ราคาเท่าไหร่`, `น้ำมัน ราคา`, and `PAINT-01424 ราคา`.
 - Context guard replies with clarification for vague references such as `ตัวนี้ราคาเท่าไหร่` when no product context exists.
@@ -99,7 +101,7 @@ Never call `create_sale_reserve` in standard smoke tests.
 - LINE private: verified LINE webhook asks price and gets a reply.
 - LINE group: normal chatter is ignored; @mention stock query gets a reply.
 - No match: bot asks for product code/model/brand, not a fabricated answer.
-- Multiple match: bot asks user to choose among top candidates.
+- Multiple match: bot asks user to choose among current-page candidates and supports `เพิ่ม` for the next page when more candidates exist.
 - Numeric follow-up: after multiple match, replying `1` chooses candidate 1 with the previous stock/price intent.
 - Intent follow-up: after a successful product lookup, replying `ราคา` or `สต็อก` uses the last product context.
 - Context follow-up: after asking about a product class, replying only a brand/model phrase inherits the previous stock/search intent if confidence is high.

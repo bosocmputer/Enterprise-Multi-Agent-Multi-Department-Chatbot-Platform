@@ -66,4 +66,20 @@ describe("loadConfig alert settings", () => {
     expect(config.OPENAI_API_KEY).toBe("openai-compatible-key");
     expect(config.OPENAI_BASE_URL).toBeUndefined();
   });
+
+  it("defaults assist status UX to enabled with an 800ms delay", () => {
+    const config = loadConfig({});
+
+    expect(config.ASSIST_USER_STATUS_ENABLED).toBe(true);
+    expect(config.ASSIST_USER_STATUS_SHOW_MODEL).toBe(true);
+    expect(config.ASSIST_RESULT_FOOTER_ENABLED).toBe(true);
+    expect(config.ASSIST_STATUS_MIN_DELAY_MS).toBe(800);
+    expect(config.LLM_PARSER_TIMEOUT_MS).toBe(6000);
+  });
+
+  it("rejects negative assist status delay", () => {
+    expect(() => loadConfig({ ASSIST_STATUS_MIN_DELAY_MS: "-1" })).toThrow(
+      /ASSIST_STATUS_MIN_DELAY_MS must be greater than or equal to 0/
+    );
+  });
 });

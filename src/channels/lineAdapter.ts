@@ -8,6 +8,7 @@ import type { LlmParserMode, LookupLlmParser } from "../core/llmParser.js";
 import type { LookupOrchestrator } from "../core/lookupOrchestrator.js";
 import { runLookupWithTelemetry } from "../core/lookupTelemetry.js";
 import { formatLookupReply } from "../core/responseFormatter.js";
+import type { LlmAssistStartEvent } from "../core/types.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
 import type { CacheService, DedupStore, RateLimiter } from "../services/cacheService.js";
 
@@ -58,6 +59,10 @@ const lineWebhookSchema = z
 
 export interface LineAdapterOptions {
   alerts?: AlertSender;
+  assistResultFooterEnabled?: boolean;
+  assistStatusMinDelayMs?: number;
+  assistUserStatusEnabled?: boolean;
+  assistUserStatusShowModel?: boolean;
   businessProfile: BusinessProfile;
   channelAccessToken: string;
   channelSecret: string;
@@ -146,6 +151,7 @@ export class LineAdapter {
     }
 
     const contextKey = `line:context:${chatId}:${userId}`;
+    const assistStatus = this.createAssistStatusController(event);
     const resolved = await resolveTextWithContext({
       businessProfile: this.options.businessProfile,
       contextStore: this.options.contextStore,
@@ -167,15 +173,22 @@ export class LineAdapter {
         chatId,
         userId
       },
-      { logger: this.options.logger, metrics: this.options.metrics }
+      { logger: this.options.logger, metrics: this.options.metrics, onAssistStart: assistStatus.onAssistStart }
     );
+    await assistStatus.finish();
     await saveLookupContext({
       contextStore: this.options.contextStore,
       key: contextKey,
       result,
       ttlSeconds: this.options.contextTtlSeconds ?? 300
     });
-    await this.reply(event.replyToken, formatLookupReply(result, this.options.businessProfile));
+    await this.reply(
+      event.replyToken,
+      formatLookupReply(result, this.options.businessProfile, {
+        assistResultFooterEnabled: this.options.assistResultFooterEnabled,
+        assistShowModel: this.options.assistUserStatusShowModel
+      })
+    );
     await alertOnLookupDependencyError(this.options.alerts, "line", result);
     this.options.metrics?.recordChannelUpdate("line", "handled");
     return true;
@@ -211,6 +224,59 @@ export class LineAdapter {
     if (!response.ok) {
       await this.options.alerts?.send("line_reply_failed", `LINE reply failed with HTTP ${response.status}`);
       throw new Error(`LINE reply failed with HTTP ${response.status}`);
+    }
+  }
+
+  private createAssistStatusController(event: z.infer<typeof lineEventSchema>): {
+    finish: () => Promise<void>;
+    onAssistStart: (assist: LlmAssistStartEvent) => void;
+  } {
+    let started = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pendingSend: Promise<void> = Promise.resolve();
+
+    return {
+      finish: async () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        await pendingSend;
+      },
+      onAssistStart: (assist: LlmAssistStartEvent) => {
+        if (!this.options.assistUserStatusEnabled || started) return;
+        if (event.source.type !== "user" || !event.source.userId) return;
+        started = true;
+        const delayMs = Math.max(0, this.options.assistStatusMinDelayMs ?? 800);
+        const send = () => {
+          pendingSend = this.startLoadingAnimation(event.source.userId as string, assist).catch((error) => {
+            this.options.logger?.warn({ error }, "LINE loading animation failed");
+          });
+        };
+        if (delayMs === 0) {
+          send();
+          return;
+        }
+        timer = setTimeout(send, delayMs);
+      }
+    };
+  }
+
+  private async startLoadingAnimation(userId: string, assist: LlmAssistStartEvent): Promise<void> {
+    const loadingSeconds = Math.min(60, Math.max(5, Math.ceil(assist.timeoutMs / 1000)));
+    const response = await this.fetchImpl("https://api.line.me/v2/bot/chat/loading/start", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.options.channelAccessToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        chatId: userId,
+        loadingSeconds
+      })
+    });
+    if (!response.ok) {
+      this.options.logger?.warn({ status: response.status }, "LINE loading animation HTTP failure");
     }
   }
 }

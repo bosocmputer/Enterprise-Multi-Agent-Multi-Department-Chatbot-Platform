@@ -1,5 +1,24 @@
 export type LookupIntent = "search_product" | "stock" | "price" | "stock_price";
 
+export type LlmAssistReason = "no_match_retry" | "unsupported";
+
+export interface LlmAssistInfo {
+  durationMs?: number;
+  model: string;
+  outcome?: string;
+  provider: string;
+  reason: LlmAssistReason;
+  status: "parsed" | "rejected";
+  timeoutMs: number;
+}
+
+export interface LlmAssistStartEvent {
+  model: string;
+  provider: string;
+  reason: LlmAssistReason;
+  timeoutMs: number;
+}
+
 export type ParseOutcome =
   | {
       status: "parsed";
@@ -7,11 +26,13 @@ export type ParseOutcome =
       keyword: string;
       isExactCode: boolean;
       searchTerms: string[];
+      assist?: LlmAssistInfo;
       source?: "deterministic" | "llm";
     }
   | {
       status: "unsupported";
       reason: string;
+      assist?: LlmAssistInfo;
     };
 
 export interface ProductCandidate {
@@ -59,11 +80,13 @@ export type LookupResult =
       cacheHit: boolean;
       datasetLabel: string;
       tenantStatus: "demo" | "real";
+      assist?: LlmAssistInfo;
     }
   | {
       status: "no_match";
       intent: LookupIntent;
       keyword: string;
+      assist?: LlmAssistInfo;
     }
   | {
       status: "multiple_matches";
@@ -75,12 +98,15 @@ export type LookupResult =
       pageStart?: number;
       returned?: number;
       totalFound?: number;
+      assist?: LlmAssistInfo;
     }
   | {
       status: "unsupported";
       reason: string;
+      assist?: LlmAssistInfo;
     }
   | {
       status: "dependency_error";
       reason: "sml_timeout" | "sml_error" | "invalid_sml_response" | "sml_circuit_open";
+      assist?: LlmAssistInfo;
     };

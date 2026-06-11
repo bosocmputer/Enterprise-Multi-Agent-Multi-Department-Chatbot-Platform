@@ -7,6 +7,11 @@ export const lookupIntentSchema = z.enum(["search_product", "stock", "price", "s
 const phraseSchema = z.array(z.string().min(1)).default([]);
 
 const defaultReplyStyle = {
+  assistFailureMessage:
+    "LiteLLM assist model {model} ตีความไม่สำเร็จ ({outcome}, {durationMs}ms) กรุณาส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นให้ชัดขึ้น",
+  assistStartingMessage:
+    "กำลังใช้ LiteLLM assist model {model} ช่วยตีความคำถามนี้ครับ ช้าเร็วขึ้นอยู่กับ model ที่ใช้งาน...",
+  assistSuccessFooter: "Assist: LiteLLM {model} ช่วยตีความคำค้น; ข้อมูลสินค้า/ราคา/สต็อกมาจาก SML",
   fallbackProductHints: "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น",
   helpFooter: "ถ้าผมเจอหลายรายการ ให้ตอบเลข 1-5 เพื่อเลือก หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
   helpIntro: "ส่งชื่อสินค้า รหัส รุ่น หรือยี่ห้อมาได้เลยครับ ผมจะช่วยเช็กสต็อก/ราคาให้จาก SML",
@@ -59,6 +64,9 @@ export const businessProfileSchema = z
     locale: z.string().min(2).default("th-TH"),
     replyStyle: z
       .object({
+        assistFailureMessage: z.string().default(defaultReplyStyle.assistFailureMessage),
+        assistStartingMessage: z.string().default(defaultReplyStyle.assistStartingMessage),
+        assistSuccessFooter: z.string().default(defaultReplyStyle.assistSuccessFooter),
         fallbackProductHints: z.string().default(defaultReplyStyle.fallbackProductHints),
         helpFooter: z.string().default(defaultReplyStyle.helpFooter),
         helpIntro: z.string().default(defaultReplyStyle.helpIntro),

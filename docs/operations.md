@@ -23,8 +23,9 @@ Expose at least:
 | `cache_hit_ratio{kind}` | Cache effectiveness. |
 | `parts_lookup_sml_tool_duration_ms{tool,outcome}` | SML dependency health. |
 | `parts_lookup_sml_tool_calls_total{tool,outcome}` | SML integration failures and volume. |
-| `parts_lookup_llm_parse_total{mode,outcome}` | LLM parser quality, rejection rate, and shadow/assist activity. |
+| `parts_lookup_llm_parse_total{mode,outcome,model}` | LLM parser quality, rejection rate, and shadow/assist activity. |
 | `parts_lookup_llm_parse_duration_ms{model,outcome}` | LLM parser latency and timeout risk. |
+| `parts_lookup_llm_assist_started_total{mode,model,reason}` | User-visible assist slow-path starts by model and trigger reason. |
 | `reply_errors_total{channel}` | Channel delivery issues. |
 | `dedup_hits_total{channel}` | Duplicate webhook events. |
 | `rate_limited_total{channel}` | Abuse or noisy group behavior. |
@@ -153,8 +154,11 @@ Symptoms:
 Behavior:
 
 - In `shadow` mode, user replies are unchanged.
-- In `assist` mode, rejected parser output falls back to deterministic unsupported/no-match behavior.
+- In `assist` mode, rejected parser output falls back to deterministic unsupported/no-match behavior and can show the configured safe failure copy to the user.
+- In Telegram, assist slow-path may send a typing action plus one status message after `ASSIST_STATUS_MIN_DELAY_MS`.
+- In LINE one-on-one chats, assist slow-path can start the official loading animation; group/room chats do not receive loading animation.
 - Never use LLM content as stock or price truth.
+- If the user-facing assist status is noisy during pilot traffic, set `ASSIST_USER_STATUS_ENABLED=false` and recreate the app container without changing code.
 
 Immediate rollback:
 

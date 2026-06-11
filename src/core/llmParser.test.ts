@@ -17,6 +17,11 @@ function parserFor(contentOrError: string | Error, minConfidence = 0.75) {
         };
       }
     } as unknown as LiteLlmClient,
+    metadata: {
+      model: "openrouter/openrouter/free",
+      provider: "litellm",
+      timeoutMs: 6000
+    },
     minConfidence,
     profile
   });
@@ -26,7 +31,6 @@ describe("BusinessProfileLlmParser", () => {
   it("accepts valid JSON parser output", async () => {
     const parser = parserFor(
       JSON.stringify({
-        aliases: ["ปูน ช้าง"],
         confidence: 0.98,
         intent: "stock",
         keyword: "ปูนตราช้าง",
@@ -35,11 +39,10 @@ describe("BusinessProfileLlmParser", () => {
     );
 
     await expect(parser.parse("มีปูนตราช้างเหลือไหม")).resolves.toMatchObject({
-      aliases: ["ปูน ช้าง"],
       confidence: 0.98,
       intent: "stock",
       keyword: "ปูนตราช้าง",
-      searchTerms: ["ปูนตราช้าง", "ปูน ช้าง"],
+      searchTerms: ["ปูนตราช้าง"],
       status: "parsed"
     });
   });
@@ -55,7 +58,6 @@ describe("BusinessProfileLlmParser", () => {
     await expect(
       parserFor(
         JSON.stringify({
-          aliases: [],
           confidence: 0.95,
           intent: "inventory_inquiry",
           keyword: "ปูน",
@@ -72,7 +74,6 @@ describe("BusinessProfileLlmParser", () => {
     await expect(
       parserFor(
         JSON.stringify({
-          aliases: [],
           confidence: 0.95,
           intent: "stock",
           keyword: "",
@@ -85,11 +86,26 @@ describe("BusinessProfileLlmParser", () => {
     });
   });
 
+  it("rejects empty search terms", async () => {
+    await expect(
+      parserFor(
+        JSON.stringify({
+          confidence: 0.95,
+          intent: "stock",
+          keyword: "ปูน",
+          searchTerms: []
+        })
+      ).parse("มีปูนไหม")
+    ).resolves.toMatchObject({
+      reason: "invalid_schema",
+      status: "rejected"
+    });
+  });
+
   it("rejects low confidence output", async () => {
     await expect(
       parserFor(
         JSON.stringify({
-          aliases: [],
           confidence: 0.5,
           intent: "stock",
           keyword: "ปูน",
@@ -111,11 +127,39 @@ describe("BusinessProfileLlmParser", () => {
     });
   });
 
+  it("rejects truncated LiteLLM completions", async () => {
+    const parser = new BusinessProfileLlmParser({
+      client: {
+        createJsonChatCompletion: async () => ({
+          content: JSON.stringify({
+            confidence: 0.95,
+            intent: "stock",
+            keyword: "ปูน",
+            searchTerms: ["ปูน"]
+          }),
+          finishReason: "length",
+          model: "openrouter/openrouter/free"
+        })
+      } as unknown as LiteLlmClient,
+      metadata: {
+        model: "openrouter/openrouter/free",
+        provider: "litellm",
+        timeoutMs: 6000
+      },
+      minConfidence: 0.75,
+      profile
+    });
+
+    await expect(parser.parse("มีปูนไหม")).resolves.toMatchObject({
+      reason: "truncated",
+      status: "rejected"
+    });
+  });
+
   it("records parser metrics through telemetry", async () => {
     const metrics = new MetricsRegistry();
     const parser = parserFor(
       JSON.stringify({
-        aliases: [],
         confidence: 0.95,
         intent: "stock",
         keyword: "ปูน",
@@ -129,5 +173,31 @@ describe("BusinessProfileLlmParser", () => {
     expect(rendered).toContain("parts_lookup_llm_parse_total");
     expect(rendered).toContain('mode="shadow"');
     expect(rendered).toContain('outcome="parsed"');
+  });
+
+  it("turns unexpected parser throws into provider-error telemetry", async () => {
+    const metrics = new MetricsRegistry();
+    const result = await runLlmParseWithTelemetry(
+      {
+        metadata: {
+          model: "openrouter/openrouter/free",
+          provider: "litellm",
+          timeoutMs: 6000
+        },
+        parse: async () => {
+          throw new Error("boom");
+        }
+      },
+      "มีปูนไหม",
+      { metrics, mode: "assist" }
+    );
+
+    expect(result).toMatchObject({
+      model: "openrouter/openrouter/free",
+      outcome: "rejected_provider_error",
+      reason: "provider_error",
+      status: "rejected"
+    });
+    expect(metrics.renderPrometheus()).toContain('outcome="rejected_provider_error"');
   });
 });

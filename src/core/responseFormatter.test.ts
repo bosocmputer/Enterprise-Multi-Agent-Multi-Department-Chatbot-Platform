@@ -30,4 +30,55 @@ describe("response formatter", () => {
     expect(reply).toContain("5. A010 - สินค้า 10");
     expect(reply).toContain("เพิ่ม");
   });
+
+  it("appends assist footer only when assist parsed successfully", () => {
+    const reply = formatLookupReply(
+      {
+        cacheHit: false,
+        datasetLabel: "sml-test",
+        intent: "stock",
+        product: { code: "C001", name: "ปูน" },
+        status: "success",
+        stock: [{ qty: 1, warehouse: "WH-01" }],
+        tenantStatus: "real",
+        assist: {
+          durationMs: 3200,
+          model: "openrouter/openrouter/free",
+          outcome: "parsed",
+          provider: "litellm",
+          reason: "no_match_retry",
+          status: "parsed",
+          timeoutMs: 6000
+        }
+      },
+      profile
+    );
+
+    expect(reply).toContain("Assist: LiteLLM openrouter/openrouter/free");
+    expect(reply).toContain("ข้อมูลสินค้า/ราคา/สต็อกมาจาก SML");
+  });
+
+  it("uses assist failure copy when assist is rejected", () => {
+    const reply = formatLookupReply(
+      {
+        intent: "stock",
+        keyword: "ปูนตราช้าง",
+        status: "no_match",
+        assist: {
+          durationMs: 6001,
+          model: "openrouter/openrouter/free",
+          outcome: "rejected_timeout",
+          provider: "litellm",
+          reason: "no_match_retry",
+          status: "rejected",
+          timeoutMs: 6000
+        }
+      },
+      profile
+    );
+
+    expect(reply).toContain("LiteLLM assist model openrouter/openrouter/free");
+    expect(reply).toContain("rejected_timeout");
+    expect(reply).toContain("6001ms");
+  });
 });

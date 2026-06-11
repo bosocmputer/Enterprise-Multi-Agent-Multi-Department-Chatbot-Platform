@@ -89,11 +89,19 @@ export class MetricsRegistry {
   }
 
   recordLlmParse(mode: string, model: string, outcome: string, durationMs: number): void {
-    const labels = { mode, outcome };
+    const labels = { mode, model, outcome };
     this.counter("parts_lookup_llm_parse_total", "LLM parser attempts by mode and outcome.", labels);
     this.histogram("parts_lookup_llm_parse_duration_ms", "LLM parser duration in milliseconds.", durationMs, {
       model,
       outcome
+    });
+  }
+
+  recordLlmAssistStarted(mode: string, model: string, reason: string): void {
+    this.counter("parts_lookup_llm_assist_started_total", "LLM assist slow-path starts by mode, model, and reason.", {
+      mode,
+      model,
+      reason
     });
   }
 

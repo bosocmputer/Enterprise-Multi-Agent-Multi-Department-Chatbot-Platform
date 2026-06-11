@@ -15,6 +15,10 @@ const pollingWorker = config.TELEGRAM_POLLING_ENABLED
       new TelegramAdapter({
         botToken: config.TELEGRAM_BOT_TOKEN as string,
         alerts: runtime.alerts,
+        assistResultFooterEnabled: config.ASSIST_RESULT_FOOTER_ENABLED,
+        assistStatusMinDelayMs: config.ASSIST_STATUS_MIN_DELAY_MS,
+        assistUserStatusEnabled: config.ASSIST_USER_STATUS_ENABLED,
+        assistUserStatusShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL,
         businessProfile: runtime.businessProfile,
         botUsername: config.TELEGRAM_BOT_USERNAME,
         contextStore: runtime.state,

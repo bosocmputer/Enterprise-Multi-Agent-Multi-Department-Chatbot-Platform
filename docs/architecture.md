@@ -54,7 +54,7 @@ SML owns:
 5. Context: Telegram/LINE can map `1`, a bare product code, or intent-only follow-up to the previous short-lived Redis context.
 6. Profile: resolve the tenant Business Profile from channel/config.
 7. Normalize: channel-specific payload becomes a common message model.
-8. Understand: query understanding extracts intent and product keyword/code from context, Business Profile, aliases, deterministic rules, or optional LLM.
+8. Understand: query understanding extracts intent and product keyword/code from context, Business Profile, aliases, deterministic rules, or optional LLM. In assist mode, Telegram can show a one-time user status while the slow-path parser runs.
 9. Lookup: orchestrator checks Redis cache, then calls SML read-only tools on cache miss.
 10. Format: formatter builds a concise reply with product code/name/unit/stock/price/freshness.
 11. Reply: adapter sends to the originating chat.
@@ -89,7 +89,7 @@ Use it for:
 - cache warming
 - product alias/index refresh from tenant profile or catalog data
 - non-urgent observability export
-- optional LiteLLM parse for ambiguous language that cannot be resolved by context/config
+- optional LiteLLM assist parse for ambiguous language or deterministic no-match that cannot be resolved by context/config
 - offline PyThaiNLP evaluation of reviewed Thai examples for alias/context/test improvements
 
 ## Business Profile Contract
@@ -112,7 +112,8 @@ Rules:
 - LLM prompts must be generated from Business Profile data and must return schema-validated JSON.
 - The lookup orchestrator only receives structured queries; it does not parse raw chat text directly.
 - In `shadow` mode, LLM parser output is logged/measured but does not change the user-facing reply.
-- In `assist` mode, LLM parser output may be used only when deterministic parsing is unsupported and local validation/confidence checks pass.
+- In `assist` mode, LLM parser output may be used only when deterministic parsing is unsupported or a deterministic lookup returns no match, and local validation/confidence checks pass.
+- User-facing assist status/footer copy is configured in Business Profile reply style; it may reveal provider/model, but must still state that SML is the source of stock/price truth.
 - PyThaiNLP is a developer evaluation tool for lexical Thai segmentation and alias discovery; it must not become a stock/price source and must not run in the default request path.
 
 ## Failure Boundaries
@@ -123,7 +124,7 @@ Rules:
 | Duplicate event | Acknowledge/ignore; do not send duplicate reply. |
 | Group message without gate | Ignore silently. |
 | Parser cannot find intent | Reply with tenant-specific examples in private chat; ignore or concise help in group. |
-| LLM parser invalid/timeout | Treat as unsupported or no-match; do not expose provider details to the user. |
+| LLM parser invalid/timeout | Treat as unsupported or no-match; if configured, show safe assist failure copy with provider/model/outcome but never raw prompt, raw provider payload, token, stock, or price. |
 | No product found | Ask for product code, model, brand, or clearer keyword. |
 | Multiple products found | Present top choices and ask the user to choose. |
 | SML timeout/unavailable | Fail closed with safe fallback; never invent stock/price. |

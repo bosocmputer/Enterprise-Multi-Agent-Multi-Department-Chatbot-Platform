@@ -84,19 +84,29 @@ Rules:
 
 ```text
 search_product(keyword) returns []
+-> if LLM assist is enabled, parse once for safer searchTerms
+-> retry search_product with validated assist terms only
 -> reply: "ไม่พบสินค้า ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นเพิ่ม"
 -> do not call stock/price
 -> audit outcome=no_match
 ```
 
+Assist rules:
+
+- Send at most one assist status per incoming user message.
+- Do not run assist for exact code or clear deterministic queries that already return SML candidates.
+- Reject assist output on timeout, malformed JSON, invalid schema, low confidence, empty keyword/search terms, or truncated provider completion.
+- Never use LLM output as stock, price, or product truth; SML remains the only source for facts.
+
 ## 4. Multiple Matches
 
 ```text
 search_product(keyword) returns many candidates
--> select top 3-5 safe candidates
+-> collect a bounded candidate set
+-> show 5 candidates at a time
 -> reply with product code/name/unit choices
--> store candidates in short session context
--> next user reply can choose by number or code
+-> store candidates plus current page in short session context
+-> next user reply can choose by page-relative number/code or ask for "เพิ่ม"
 ```
 
 The bot must not choose a product when confidence is insufficient.

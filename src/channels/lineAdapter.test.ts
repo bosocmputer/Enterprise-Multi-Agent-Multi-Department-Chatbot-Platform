@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { loadBusinessProfile } from "../config/businessProfile.js";
+import type { LookupLlmParser } from "../core/llmParser.js";
 import { LookupOrchestrator } from "../core/lookupOrchestrator.js";
 import { SmlClient } from "../integrations/smlClient.js";
 import { createLogger } from "../observability/logger.js";
@@ -149,5 +150,56 @@ describe("LineAdapter", () => {
           "Lookup dependency error on line: sml_error. Staff received the safe fallback; check SML MCP/readiness."
       }
     ]);
+  });
+
+  it("starts LINE loading animation for one-on-one assist slow path", async () => {
+    const calls: Array<{ body: unknown; url: string }> = [];
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => ({ model: "openrouter/openrouter/free", reason: "timeout", status: "rejected" })
+    };
+    const adapter = new LineAdapter({
+      assistStatusMinDelayMs: 0,
+      assistUserStatusEnabled: true,
+      businessProfile: profile,
+      channelAccessToken: "line-token",
+      channelSecret: "line-secret",
+      fetchImpl: async (input, init) => {
+        calls.push({ body: JSON.parse(String(init?.body)), url: String(input) });
+        return new Response(JSON.stringify({}), { status: 200 });
+      },
+      groupPrefixes: ["/"]
+    });
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => []
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(
+      adapter.handleWebhook(
+        {
+          events: [
+            {
+              type: "message",
+              webhookEventId: "evt-assist",
+              replyToken: "reply-assist",
+              source: { type: "user", userId: "u1" },
+              message: { id: "m-assist", type: "text", text: "มีปูนตราช้างเหลือไหม" }
+            }
+          ]
+        },
+        lookup
+      )
+    ).resolves.toEqual({ handled: 1, ignored: 0 });
+
+    expect(calls[0]).toMatchObject({
+      url: "https://api.line.me/v2/bot/chat/loading/start",
+      body: { chatId: "u1", loadingSeconds: 6 }
+    });
+    expect(calls[1]?.url).toBe("https://api.line.me/v2/bot/message/reply");
+    expect(JSON.stringify(calls[1]?.body)).toContain("ตีความไม่สำเร็จ");
   });
 });

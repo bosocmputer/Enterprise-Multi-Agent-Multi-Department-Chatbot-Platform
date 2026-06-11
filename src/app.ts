@@ -152,7 +152,10 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       );
       return {
         result,
-        reply: formatLookupReply(result, businessProfile)
+        reply: formatLookupReply(result, businessProfile, {
+          assistResultFooterEnabled: config.ASSIST_RESULT_FOOTER_ENABLED,
+          assistShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL
+        })
       };
     });
 
@@ -192,6 +195,10 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
   if (config.LINE_ENABLED) {
     const line = new LineAdapter({
       alerts,
+      assistResultFooterEnabled: config.ASSIST_RESULT_FOOTER_ENABLED,
+      assistStatusMinDelayMs: config.ASSIST_STATUS_MIN_DELAY_MS,
+      assistUserStatusEnabled: config.ASSIST_USER_STATUS_ENABLED,
+      assistUserStatusShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL,
       businessProfile,
       channelAccessToken: config.LINE_CHANNEL_ACCESS_TOKEN as string,
       channelSecret: config.LINE_CHANNEL_SECRET as string,
@@ -224,6 +231,10 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       botToken: config.TELEGRAM_BOT_TOKEN as string,
       businessProfile,
       alerts,
+      assistResultFooterEnabled: config.ASSIST_RESULT_FOOTER_ENABLED,
+      assistStatusMinDelayMs: config.ASSIST_STATUS_MIN_DELAY_MS,
+      assistUserStatusEnabled: config.ASSIST_USER_STATUS_ENABLED,
+      assistUserStatusShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL,
       webhookSecret: config.TELEGRAM_WEBHOOK_SECRET as string,
       botUsername: config.TELEGRAM_BOT_USERNAME,
       contextStore: state,

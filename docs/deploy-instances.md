@@ -150,7 +150,7 @@ curl -fsS -X POST http://localhost:<port>/internal/parse \
 - No write SML tool in allowlist.
 - Redis connectivity verified.
 - `/metrics` exposes lookup, Telegram, and SML tool metrics without secrets.
-- If LLM parser is enabled, `/metrics` exposes parser attempt and latency metrics without raw prompts or secrets.
+- If LLM parser is enabled, `/metrics` exposes parser attempt, assist-start, and latency metrics without raw prompts or secrets.
 - `/ready`, `/metrics`, and `/internal/lookup` reject unauthenticated production requests.
 - `SML_TENANT_STATUS=real` is explicit after `192.168.2.248:3515` real SML data smoke passes.
 - Cache TTLs reviewed with business users.
@@ -172,11 +172,15 @@ LLM_PARSER_MODE=assist
 LLM_PROVIDER=litellm
 LITELLM_BASE_URL=http://192.168.2.248:4000
 LITELLM_MODEL=openrouter/openrouter/free
-LLM_PARSER_TIMEOUT_MS=2000
+LLM_PARSER_TIMEOUT_MS=6000
 LLM_MIN_CONFIDENCE=0.75
+ASSIST_USER_STATUS_ENABLED=true
+ASSIST_USER_STATUS_SHOW_MODEL=true
+ASSIST_STATUS_MIN_DELAY_MS=800
+ASSIST_RESULT_FOOTER_ENABLED=true
 ```
 
-Store the key only in server `.env` as `LITELLM_API_KEY` or `OPENAI_API_KEY`. The current LiteLLM Swagger requires the `x-litellm-api-key` header; do not commit the key. In assist mode the LLM may only provide structured intent/search terms; SML remains the source of truth for stock and price. Roll back by changing `LLM_PARSER_MODE=shadow` or `off` and recreating the app container.
+Store the key only in server `.env` as `LITELLM_API_KEY` or `OPENAI_API_KEY`. The current LiteLLM Swagger requires the `x-litellm-api-key` header; do not commit the key. In assist mode the LLM may only provide structured intent/search terms; SML remains the source of truth for stock and price. Telegram may show the LiteLLM model/status on slow-path messages, while LINE uses loading animation only for one-on-one chats. Roll back by changing `LLM_PARSER_MODE=shadow` or `off` and recreating the app container.
 
 ## Git-Based Pilot Deploy
 

@@ -5,8 +5,16 @@ import type { MetricsRegistry } from "../observability/metrics.js";
 import type { CacheService, DedupStore } from "../services/cacheService.js";
 import type { LlmParserMode, LookupLlmParser } from "./llmParser.js";
 import { runLlmParseWithTelemetry } from "./llmParser.js";
-import { understandLookupQuery } from "./queryUnderstanding.js";
-import type { LookupRequest, LookupResult, ParseOutcome, ProductCandidate, ProductSearchResult } from "./types.js";
+import { assistInfo, startAssist, understandLookupQuery } from "./queryUnderstanding.js";
+import type {
+  LlmAssistInfo,
+  LlmAssistStartEvent,
+  LookupRequest,
+  LookupResult,
+  ParseOutcome,
+  ProductCandidate,
+  ProductSearchResult
+} from "./types.js";
 
 const SEARCH_RESULT_LIMIT = 20;
 const MULTI_MATCH_PAGE_SIZE = 5;
@@ -33,6 +41,7 @@ export interface LookupOrchestratorOptions {
 export interface LookupTelemetryOptions {
   logger?: pino.Logger;
   metrics?: MetricsRegistry;
+  onAssistStart?: (event: LlmAssistStartEvent) => void | Promise<void>;
 }
 
 export class LookupOrchestrator {
@@ -66,11 +75,12 @@ export class LookupOrchestrator {
       llmParser: this.llmParser,
       llmParserMode: this.llmParserMode,
       logger: telemetry.logger,
-      metrics: telemetry.metrics
+      metrics: telemetry.metrics,
+      onAssistStart: telemetry.onAssistStart
     });
     if (parsed.status === "unsupported") {
       this.triggerShadowParse(request.text, telemetry);
-      return { status: "unsupported", reason: parsed.reason };
+      return { status: "unsupported", reason: parsed.reason, assist: parsed.assist };
     }
 
     try {
@@ -81,13 +91,13 @@ export class LookupOrchestrator {
 
       if (candidates.length === 0) {
         const assisted = await this.retryNoMatchWithAssist(request.text, parsed, telemetry);
-        if (assisted) {
+        if (assisted?.status === "found") {
           parsed = assisted.parsed;
           searchResult = assisted.searchResult;
           candidates = searchResult.candidates;
         } else {
           this.triggerShadowParse(request.text, telemetry);
-          return { status: "no_match", intent: parsed.intent, keyword: parsed.keyword };
+          return { status: "no_match", intent: parsed.intent, keyword: parsed.keyword, assist: assisted?.assist };
         }
       }
 
@@ -141,21 +151,22 @@ export class LookupOrchestrator {
         prices,
         cacheHit,
         datasetLabel: this.datasetLabel,
-        tenantStatus: this.tenantStatus
+        tenantStatus: this.tenantStatus,
+        assist: parsed.assist
       };
     } catch (error) {
       if (error instanceof SmlClientError) {
         if (error.code === "timeout") {
-          return { status: "dependency_error", reason: "sml_timeout" };
+          return { status: "dependency_error", reason: "sml_timeout", assist: parsed.assist };
         }
         if (error.code === "invalid_response") {
-          return { status: "dependency_error", reason: "invalid_sml_response" };
+          return { status: "dependency_error", reason: "invalid_sml_response", assist: parsed.assist };
         }
         if (error.code === "circuit_open") {
-          return { status: "dependency_error", reason: "sml_circuit_open" };
+          return { status: "dependency_error", reason: "sml_circuit_open", assist: parsed.assist };
         }
       }
-      return { status: "dependency_error", reason: "sml_error" };
+      return { status: "dependency_error", reason: "sml_error", assist: parsed.assist };
     }
   }
 
@@ -206,9 +217,18 @@ export class LookupOrchestrator {
     text: string,
     parsed: ParsedLookup,
     telemetry: LookupTelemetryOptions
-  ): Promise<{ parsed: ParsedLookup; searchResult: CandidateSearchResult } | undefined> {
+  ): Promise<
+    | { status: "found"; parsed: ParsedLookup; searchResult: CandidateSearchResult }
+    | { status: "not_found"; assist: LlmAssistInfo }
+    | undefined
+  > {
     if (this.llmParserMode !== "assist" || !this.llmParser || parsed.source === "llm") return undefined;
 
+    const assistStart = startAssist(this.llmParser, "no_match_retry", {
+      llmParserMode: this.llmParserMode,
+      metrics: telemetry.metrics,
+      onAssistStart: telemetry.onAssistStart
+    });
     const llmParsed = await runLlmParseWithTelemetry(this.llmParser, text, {
       logger: telemetry.logger,
       metrics: telemetry.metrics,
@@ -217,8 +237,15 @@ export class LookupOrchestrator {
       telemetry.logger?.warn({ error }, "llm assist parser failed");
       return undefined;
     });
-    if (!llmParsed || llmParsed.status !== "parsed" || llmParsed.intent === "unsupported") return undefined;
-    if (!this.businessProfile.enabledIntents.includes(llmParsed.intent)) return undefined;
+    if (!llmParsed) return undefined;
+    let assist = assistInfo(assistStart, llmParsed);
+    if (!llmParsed || llmParsed.status !== "parsed" || llmParsed.intent === "unsupported") {
+      return { status: "not_found", assist };
+    }
+    if (!this.businessProfile.enabledIntents.includes(llmParsed.intent)) {
+      assist = { ...assist, outcome: "rejected_intent_disabled", status: "rejected" };
+      return { status: "not_found", assist };
+    }
 
     const assistedParsed: ParsedLookup = {
       status: "parsed",
@@ -226,13 +253,14 @@ export class LookupOrchestrator {
       keyword: llmParsed.keyword,
       isExactCode: exactCodePattern.test(llmParsed.keyword),
       searchTerms: llmParsed.searchTerms,
+      assist,
       source: "llm"
     };
     const searchResult = assistedParsed.isExactCode
       ? { candidates: [{ code: assistedParsed.keyword, name: assistedParsed.keyword }], returned: 1, totalFound: 1 }
       : await this.searchProductsByTerms(assistedParsed.searchTerms);
-    if (searchResult.candidates.length === 0) return undefined;
-    return { parsed: assistedParsed, searchResult };
+    if (searchResult.candidates.length === 0) return { status: "not_found", assist };
+    return { status: "found", parsed: assistedParsed, searchResult };
   }
 
   private async getCachedStock(code: string) {
@@ -301,7 +329,8 @@ function multipleMatches(parsed: ParsedLookup, searchResult: CandidateSearchResu
     pageSize,
     pageStart: 0,
     returned: searchResult.returned ?? searchResult.candidates.length,
-    totalFound
+    totalFound,
+    assist: parsed.assist
   };
 }
 

@@ -105,6 +105,7 @@ describe("LookupOrchestrator", () => {
   it("does not let shadow LLM output change the user-facing lookup result", async () => {
     let llmCalls = 0;
     const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
       parse: async () => {
         llmCalls += 1;
         return {
@@ -135,6 +136,7 @@ describe("LookupOrchestrator", () => {
   it("does not call LLM assist for clear queries that return SML candidates", async () => {
     let llmCalls = 0;
     const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
       parse: async () => {
         llmCalls += 1;
         return { reason: "provider_error", status: "rejected" };
@@ -162,6 +164,7 @@ describe("LookupOrchestrator", () => {
     const requestedTerms: string[] = [];
     let llmCalls = 0;
     const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
       parse: async () => {
         llmCalls += 1;
         return {
@@ -197,6 +200,7 @@ describe("LookupOrchestrator", () => {
 
   it("falls back to no-match when LLM assist is rejected", async () => {
     const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
       parse: async () => ({ reason: "low_confidence", status: "rejected" })
     };
     const lookup = new LookupOrchestrator(
@@ -208,6 +212,12 @@ describe("LookupOrchestrator", () => {
     );
 
     await expect(lookup.lookup({ text: "มีปูนตราช้างเหลือไหม" })).resolves.toMatchObject({
+      assist: {
+        model: "openrouter/openrouter/free",
+        outcome: "rejected_low_confidence",
+        reason: "no_match_retry",
+        status: "rejected"
+      },
       status: "no_match",
       keyword: "ปูนตราช้าง"
     });
