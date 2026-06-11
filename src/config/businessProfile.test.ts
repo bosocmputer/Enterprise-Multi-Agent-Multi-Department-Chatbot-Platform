@@ -34,6 +34,21 @@ describe("business profile", () => {
     expect(domain.connectors.flatMap((connector) => connector.allowedTools)).not.toContain("create_sale_reserve");
   });
 
+  it("loads the mock auto-parts profile without changing source contracts", () => {
+    const profile = loadBusinessProfile("profiles/auto-parts-mock.json");
+    const domain = normalizeDomainProfile(profile);
+
+    expect(profile.tenantId).toBe("auto-parts-mock");
+    expect(domain.defaultEntityType).toBe("part");
+    expect(domain.actions.map((action) => action.id)).toEqual(
+      expect.arrayContaining(["search", "availability", "price"])
+    );
+    expect(domain.connectors[0]).toMatchObject({
+      readOnly: true,
+      source: "mock-catalog"
+    });
+  });
+
   it("rejects invalid intent regex patterns", () => {
     const parsed = businessProfileSchema.safeParse({
       businessType: "test",

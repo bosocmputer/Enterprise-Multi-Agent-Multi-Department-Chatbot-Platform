@@ -94,6 +94,7 @@ Possible future additions, not MVP:
 - supplier/purchase lookup
 - admin policy UI
 - local product alias index
+- mock and real tenant profile fixtures for each supported domain before cutover
 - Business Profile admin UI and validation workflow
 - document/manual lookup
 - multi-branch stock routing

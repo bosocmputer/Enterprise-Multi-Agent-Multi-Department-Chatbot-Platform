@@ -29,7 +29,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 Latest local run on 2026-06-11:
 
-- `npm test`: 17 files, 89 tests passed.
+- `npm test`: 17 files, 91 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -72,6 +72,7 @@ Current covered cases:
 - Selection constraints such as `เอาแบบถูกสุดมีไหม` do not trigger SML search without enough context.
 - Known bare Business Profile terms such as `ปูนตราช้าง` become search lookups instead of generic help.
 - Domain Profile v2 drives action/entity metadata and command aliases without source edits.
+- Mock auto-parts profile uses the same lookup core with a mocked connector client, proving the core is not bound to construction-materials data.
 - Runtime source isolation test blocks tenant-specific vocabulary from non-test TypeScript source.
 - Lookup metrics include `tenant`, `entity_type`, `action`, `source`, and `confidence_band` labels.
 

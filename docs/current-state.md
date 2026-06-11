@@ -19,7 +19,7 @@ Last updated: 2026-06-11
 - Implemented app services: Fastify lookup service, SML read-only client, Domain Profile v2 normalization, generic entity/action contracts, SML inventory adapter, deterministic parser, context guard for vague Thai follow-ups, optional LiteLLM slow-path parser with assist-mode status UX, response formatter, Redis-backed cache/dedup/rate limit/context state, Telegram polling worker, LINE webhook adapter, optional Telegram webhook route behind env flags, Prometheus-style `/metrics`, Telegram ops alerts.
 - Implemented developer tooling: offline PyThaiNLP Thai query evaluation under `tools/thai-query-eval/` for reviewed/redacted no-match and unsupported examples. It is not part of the Docker app runtime.
 - Deploy services: `parts-lookup-api` and dedicated `parts-lookup-redis` in Docker Compose project/network/volume names prefixed with `parts-lookup`.
-- Implemented profile services: Business Profile file loader with backward-compatible v1 normalization into Domain Profile v2. `profiles/construction-demo.json` explicitly declares `inventory_item` actions/connectors for real SML construction-materials data at `192.168.2.248:3515`.
+- Implemented profile services: Business Profile file loader with backward-compatible v1 normalization into Domain Profile v2. `profiles/construction-demo.json` explicitly declares `inventory_item` actions/connectors for real SML construction-materials data at `192.168.2.248:3515`; `profiles/auto-parts-mock.json` is a non-production fixture proving the core can run another domain without source edits.
 - Deferred app services: database/profile-service backed Business Profile store, optional BullMQ worker, external metrics collector, real customer SML tenant cutover.
 - External dependency: SML MCP server confirmed at `http://192.168.2.248:3515`.
 - Optional LLM dependency: LiteLLM Swagger/API confirmed at `http://192.168.2.248:4000`; model list currently exposes `openrouter/openrouter/free`.
@@ -50,7 +50,7 @@ Last checked from this workstation and deploy server `192.168.2.109`:
 ## Known Gaps
 
 - Application code: pilot runtime exists under `src/`.
-- Testing: latest local run passed `89` Vitest tests and `npm run build`.
+- Testing: latest local run passed `91` Vitest tests and `npm run build`.
 - Server smoke: latest app deploy passed `GET /health`, unauthenticated internal endpoint rejection, authenticated `/metrics`, Redis readiness, and safe SML fallback; authenticated `/ready` is currently degraded because SML MCP is unavailable.
 - Telegram pilot bot username: `employee_assistant_248_bot`.
 - SML: least-privileged role, correct tenant/product dataset, timeout behavior, and search quality need verification.

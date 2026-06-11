@@ -1,0 +1,101 @@
+{
+  "tenantId": "auto-parts-mock",
+  "businessType": "auto-parts",
+  "locale": "th-TH",
+  "domain": {
+    "version": 2,
+    "defaultEntityType": "part",
+    "entities": [
+      {
+        "type": "part",
+        "label": "อะไหล่",
+        "idPattern": "^[A-Z0-9][A-Z0-9_-]{2,}$"
+      }
+    ],
+    "actions": [
+      {
+        "id": "search",
+        "label": "ค้นหา",
+        "legacyIntent": "search_product",
+        "entityTypes": ["part"],
+        "phrases": ["หา", "ค้นหา", "search", "find"],
+        "commandAliases": ["find", "search"]
+      },
+      {
+        "id": "availability",
+        "label": "เช็กของ",
+        "legacyIntent": "stock",
+        "entityTypes": ["part"],
+        "phrases": ["มีไหม", "มีของไหม", "ของเหลือไหม", "เหลือไหม", "stock"],
+        "commandAliases": ["stock"]
+      },
+      {
+        "id": "price",
+        "label": "เช็กราคา",
+        "legacyIntent": "price",
+        "entityTypes": ["part"],
+        "phrases": ["ราคา", "เท่าไร", "เท่าไหร่", "price"],
+        "commandAliases": ["price"]
+      },
+      {
+        "id": "availability_price",
+        "label": "เช็กของและราคา",
+        "legacyIntent": "stock_price",
+        "entityTypes": ["part"],
+        "phrases": ["มีไหม ราคา", "มีของไหม ราคาเท่าไร"],
+        "commandAliases": []
+      }
+    ],
+    "connectors": [
+      {
+        "id": "mock-parts-readonly",
+        "source": "mock-catalog",
+        "readOnly": true,
+        "entityTypes": ["part"],
+        "allowedTools": ["search_product", "get_stock_balance", "get_product_price"],
+        "actionToolMap": {
+          "search": "search_product",
+          "availability": "get_stock_balance",
+          "price": "get_product_price"
+        }
+      }
+    ]
+  },
+  "enabledIntents": ["search_product", "stock", "price", "stock_price"],
+  "intentPhrases": {
+    "stock": ["มีไหม", "มีของไหม", "ของเหลือไหม", "เหลือไหม", "stock"],
+    "price": ["ราคา", "เท่าไร", "เท่าไหร่", "price"],
+    "search_product": ["หา", "ค้นหา", "search", "find"],
+    "stock_price": ["มีไหม ราคา", "มีของไหม ราคาเท่าไร"]
+  },
+  "intentPatterns": [],
+  "fillerPhrases": ["ให้หน่อย", "หน่อย", "ครับ", "ค่ะ", "คะ"],
+  "helpExamples": ["ผ้าเบรคหน้า vios มีไหม", "หัวเทียน civic ราคา", "BRK-001 ราคา"],
+  "examples": [
+    { "text": "ผ้าเบรคหน้า vios มีไหม", "intent": "stock", "keyword": "ผ้าเบรคหน้า vios" },
+    { "text": "หัวเทียน civic ราคา", "intent": "price", "keyword": "หัวเทียน civic" },
+    { "text": "BRK-001 ราคา", "intent": "price", "keyword": "BRK-001" }
+  ],
+  "aliases": [
+    { "from": "วีออส", "to": ["vios"] },
+    { "from": "ซีวิค", "to": ["civic"] }
+  ],
+  "replyStyle": {
+    "assistStartingMessage": "กำลังใช้ LiteLLM assist model {model} ช่วยตีความคำถามนี้ครับ ช้าเร็วขึ้นอยู่กับ model ที่ใช้งาน...",
+    "assistSuccessFooter": "Assist: LiteLLM {model} ช่วยตีความคำค้น; ข้อมูลอะไหล่มาจากระบบต้นทาง",
+    "assistFailureMessage": "LiteLLM assist model {model} ตีความไม่สำเร็จ ({outcome}, {durationMs}ms) กรุณาส่งรหัสอะไหล่ รุ่นรถ ยี่ห้อ หรือคำค้นให้ชัดขึ้น",
+    "entityLabel": "อะไหล่",
+    "entityIdLabel": "รหัสอะไหล่",
+    "fallbackProductHints": "ลองส่งรหัสอะไหล่ รุ่นรถ ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น",
+    "helpIntro": "ส่งชื่ออะไหล่ รหัส รุ่นรถ หรือยี่ห้อมาได้เลยครับ ผมจะช่วยเช็กข้อมูลจากระบบต้นทางให้",
+    "helpFooter": "ถ้าผมเจอหลายรายการ ให้ตอบเลข 1-5 เพื่อเลือก หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
+    "multiMatchPrompt": "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งรหัสอะไหล่/คำค้นที่เจาะจงขึ้น",
+    "moreResultsPrompt": "ตอบเลข 1-5 เพื่อเลือกรายการ หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
+    "noContextPrompt": "ยังไม่มีรายการล่าสุดให้เลือก กรุณาส่งรหัสอะไหล่ ชื่ออะไหล่ หรือค้นหาก่อน",
+    "noMoreResultsPrompt": "แสดงรายการชุดนี้ครบแล้วครับ ถ้ายังไม่เจอ ลองส่งคำค้นให้เฉพาะเจาะจงขึ้น"
+  },
+  "sml": {
+    "datasetLabel": "mock-auto-parts",
+    "tenantStatus": "demo"
+  }
+}

@@ -6,6 +6,7 @@ import type { LookupLlmParser } from "./llmParser.js";
 import { LookupOrchestrator } from "./lookupOrchestrator.js";
 
 const profile = loadBusinessProfile("profiles/construction-demo.json");
+const autoPartsProfile = loadBusinessProfile("profiles/auto-parts-mock.json");
 
 class RecordingCacheService extends MemoryCacheService {
   readonly setKeys: string[] = [];
@@ -70,6 +71,32 @@ describe("LookupOrchestrator", () => {
       ],
       entityType: "inventory_item",
       status: "multiple_matches"
+    });
+  });
+
+  it("uses the same lookup core with a mock auto-parts domain profile", async () => {
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => [{ code: "BRK-001", name: "ผ้าเบรคหน้า Vios", unit: "ชุด" }],
+        getStockBalance: async () => [{ warehouse: "MAIN", qty: 4, unit: "ชุด" }]
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: autoPartsProfile, datasetLabel: "mock-auto-parts" }
+    );
+
+    await expect(lookup.lookup({ text: "ผ้าเบรคหน้า vios มีไหม" })).resolves.toMatchObject({
+      action: "availability",
+      entity: {
+        id: "BRK-001",
+        label: "ผ้าเบรคหน้า Vios",
+        type: "part"
+      },
+      entityType: "part",
+      product: { code: "BRK-001" },
+      source: "mock-catalog",
+      status: "success",
+      stock: [{ qty: 4, warehouse: "MAIN" }],
+      tenantId: "auto-parts-mock"
     });
   });
 
