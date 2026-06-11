@@ -8,7 +8,8 @@ Last updated: 2026-06-11
 - Product scope was revised from a broad multi-department agent platform to a speed-first read-only inventory lookup chatbot that must stay reusable across business domains.
 - Primary channels: LINE for staff operations, Telegram for pilot/debug/ops.
 - Primary data source: SML MCP HTTP `/call` read-only tools.
-- Current branch/release: local `main`; pilot service running on server port `3060`.
+- Current branch/release: `main`; latest pilot deploy verified at git SHA `763893c4b4de`; pilot service running on server port `3060`.
+- Team-facing Thai system design explainer: `docs/system-design-th.md`.
 
 ## Runtime Snapshot
 
@@ -45,7 +46,7 @@ Last checked from this workstation and deploy server `192.168.2.109`:
 - Goal: build a read-only generic lookup chatbot where staff can ask tenant-approved questions in Telegram and LINE without hardcoding business-specific vocabulary in source code.
 - In progress: Telegram real-bot pilot is enabled; LINE code is ready but disabled until credentials and dedicated tunnel are configured. Core runtime now uses generic `entity`, `action`, `source`, `context`, and `disambiguation` metadata while keeping the inventory behavior compatible.
 - Blocked: auto-parts customer data is not connected yet; current real SML data at `192.168.2.248:3515` is construction-materials data.
-- Next safest implementation step: run the Chatbot QA readiness gate with and without LiteLLM assist, then invite dev/internal Telegram testers before expanding to staff.
+- Next safest operational step: invite 2-5 staff testers in Telegram, watch logs/metrics, and convert reviewed failures into Business Profile aliases/examples or QA fixtures.
 
 ## Known Gaps
 

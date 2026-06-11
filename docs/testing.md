@@ -32,6 +32,7 @@ Latest local run on 2026-06-11:
 
 - `npm test`: 19 files, 123 tests passed.
 - `npm run build`: passed.
+- Latest server deploy smoke on `192.168.2.109:3060`: passed at git SHA `763893c4b4de`.
 
 ## Integration Tests
 

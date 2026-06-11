@@ -5,6 +5,7 @@ Use docs as on-demand context. Keep `AGENTS.md` short and point here for details
 ## Start Here
 
 - `../blueprint Enterprise Multi-Agent & Multi-Department Chatbot Platform.md` — current product and architecture blueprint
+- `system-design-th.md` — Thai system design explainer for team/staff pilot briefings
 - `current-state.md` — latest handoff, runtime state, known gaps
 - `architecture.md` — system components, boundaries, and failure design
 - `data-flow.md` — hot path, slow path, channel path, and error flow
