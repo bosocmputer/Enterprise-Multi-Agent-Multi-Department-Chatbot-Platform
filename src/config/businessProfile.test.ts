@@ -22,6 +22,10 @@ describe("business profile", () => {
     const helpText = formatBusinessProfileHelp(profile);
     expect(helpText).toContain("ปูน ราคา");
     expect(formatBusinessProfileHelp(profile)).toContain("ส่งชื่อสินค้า");
+    expect(formatBusinessProfileHelp(profile)).toContain("วิธีคุยที่แนะนำ");
+    expect(formatBusinessProfileHelp(profile)).toContain("/stock <คำค้น>");
+    expect(formatBusinessProfileHelp(profile)).toContain("/price <คำค้น>");
+    expect(formatBusinessProfileHelp(profile)).toContain("เพิ่ม - ดูรายการต่อไป");
     expect(formatBusinessProfileHelp(profile)).not.toContain("SML");
     expect(formatBusinessProfileHelp(profile)).not.toContain("ตอนนี้รองรับ");
     expect(helpText.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(3);

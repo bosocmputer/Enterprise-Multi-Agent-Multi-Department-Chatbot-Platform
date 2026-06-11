@@ -24,6 +24,9 @@ describe("domain-agnostic chat UX scenarios", () => {
       kind: "reply",
       text: expect.stringContaining(expectedHint)
     });
+    expect(help.text).toContain("วิธีคุยที่แนะนำ");
+    expect(help.text).toContain("/help");
+    expect(help.text).toContain("เพิ่ม - ดูรายการต่อไป");
     expect(help.text.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(3);
     expect(help.text).not.toContain("ตอนนี้รองรับ");
   });

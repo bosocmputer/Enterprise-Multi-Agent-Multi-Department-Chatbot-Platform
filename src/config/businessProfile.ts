@@ -17,7 +17,15 @@ const defaultReplyStyle = {
   entityLabel: "รายการ",
   fallbackProductHints: "ลองส่งรหัส รายละเอียด หรือคำค้นที่เฉพาะเจาะจงขึ้น",
   greetingMessage: "สวัสดีครับ ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ",
+  helpCommandIntro: "คำสั่งที่ใช้ได้:",
   helpFooter: "ถ้าผมเจอหลายรายการ ให้ตอบเลข 1-5 เพื่อเลือก หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
+  helpGuideIntro: "วิธีคุยกับบอท:",
+  helpGuides: [
+    "ส่ง {entityIdLabel} ได้ตรง ๆ ถ้ารู้รหัส",
+    "ส่งชื่อ รุ่น ยี่ห้อ หรือคำค้น พร้อมสิ่งที่อยากรู้",
+    "ถ้าพบหลายรายการ ให้เลือกเลขจากรายการล่าสุด",
+    "หลังเลือกแล้ว ถามต่อได้ เช่น ราคา หรือมีของไหม"
+  ],
   helpIntro: "ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ ผมจะช่วยเช็กข้อมูลจากระบบต้นทางให้",
   lookupHintMessage: "ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ",
   moreResultsPrompt: "ตอบเลข 1-5 เพื่อเลือกรายการ หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
@@ -118,7 +126,10 @@ export const businessProfileSchema = z
         entityLabel: z.string().default(defaultReplyStyle.entityLabel),
         fallbackProductHints: z.string().default(defaultReplyStyle.fallbackProductHints),
         greetingMessage: z.string().default(defaultReplyStyle.greetingMessage),
+        helpCommandIntro: z.string().default(defaultReplyStyle.helpCommandIntro),
         helpFooter: z.string().default(defaultReplyStyle.helpFooter),
+        helpGuideIntro: z.string().default(defaultReplyStyle.helpGuideIntro),
+        helpGuides: z.array(z.string().min(1)).default(defaultReplyStyle.helpGuides),
         helpIntro: z.string().default(defaultReplyStyle.helpIntro),
         lookupHintMessage: z.string().default(defaultReplyStyle.lookupHintMessage),
         moreResultsPrompt: z.string().default(defaultReplyStyle.moreResultsPrompt),
@@ -237,11 +248,44 @@ export function loadBusinessProfile(profilePath: string): BusinessProfile {
 
 export function formatBusinessProfileHelp(profile: BusinessProfile): string {
   const examples = profile.helpExamples.length > 0 ? profile.helpExamples : profile.examples.map((item) => item.text);
+  const commandLines = formatCommandHelp(profile);
   return [
     profile.replyStyle.helpIntro,
+    profile.replyStyle.helpGuideIntro,
+    ...profile.replyStyle.helpGuides.map((guide) => `• ${formatReplyStyleTemplate(profile, guide)}`),
+    examples.length > 0 ? "ตัวอย่างคำถาม:" : undefined,
     ...examples.slice(0, 3).map((example) => `- ${example}`),
+    commandLines.length > 0 ? profile.replyStyle.helpCommandIntro : undefined,
+    ...commandLines,
     profile.replyStyle.helpFooter
-  ].join("\n");
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+function formatCommandHelp(profile: BusinessProfile): string[] {
+  const lines = ["/start, /help - ดูคำแนะนำนี้"];
+  const seen = new Set(["start", "help"]);
+
+  for (const action of normalizeDomainProfile(profile).actions) {
+    const label = action.label ?? action.id;
+    for (const command of action.commandAliases) {
+      const normalized = command.trim().toLowerCase();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      lines.push(`/${normalized} <คำค้น> - ${label}`);
+    }
+  }
+
+  lines.push("เพิ่ม - ดูรายการต่อไปเมื่อมีหลายรายการ");
+  return lines;
+}
+
+function formatReplyStyleTemplate(profile: BusinessProfile, value: string): string {
+  return value
+    .replaceAll("{entityIdLabel}", profile.replyStyle.entityIdLabel)
+    .replaceAll("{entityLabel}", profile.replyStyle.entityLabel)
+    .replaceAll("{sourceTruthFooter}", profile.replyStyle.sourceTruthFooter);
 }
 
 export function phraseForIntent(profile: BusinessProfile, intent: "price" | "search_product" | "stock"): string {
