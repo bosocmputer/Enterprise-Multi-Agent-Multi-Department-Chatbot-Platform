@@ -396,7 +396,7 @@ export class LookupOrchestrator {
       outOfScopeCategory: parsed.outOfScopeCategory ?? "none",
       parserPath: parsed.parserPath ?? (parsed.assist ? "llm_assist" : "none"),
       replyPolicy: parsed.replyPolicy ?? "lookup",
-      source: this.source,
+      source: "none",
       tenantId: this.tenantId
     };
   }

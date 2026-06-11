@@ -58,4 +58,31 @@ describe("MetricsRegistry", () => {
     expect(rendered).toContain('parser_path="none"');
     expect(rendered).toContain('reply_policy="refuse_redirect"');
   });
+
+  it("marks unsupported replies that avoid connectors as source none", () => {
+    const metrics = new MetricsRegistry();
+
+    metrics.recordLookup(
+      "internal",
+      {
+        conversationScope: "out_of_scope_current_info",
+        entityType: "inventory_item",
+        outOfScopeCategory: "current_info",
+        parserPath: "none",
+        reason: "out_of_scope_current_info",
+        replyPolicy: "refuse_redirect",
+        source: "none",
+        status: "unsupported",
+        tenantId: "construction-demo"
+      },
+      2
+    );
+
+    const rendered = metrics.renderPrometheus();
+    expect(rendered).toContain('conversation_scope="out_of_scope_current_info"');
+    expect(rendered).toContain('out_of_scope_category="current_info"');
+    expect(rendered).toContain('parser_path="none"');
+    expect(rendered).toContain('reply_policy="refuse_redirect"');
+    expect(rendered).toContain('source="none"');
+  });
 });
