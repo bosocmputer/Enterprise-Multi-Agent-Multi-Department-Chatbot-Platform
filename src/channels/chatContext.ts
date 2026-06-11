@@ -94,6 +94,10 @@ export async function resolveTextWithContext(options: {
     return { kind: "lookup", text: `${context.lastProduct.code} ${intentPrompt(intentOnly, options.businessProfile)}` };
   }
 
+  if (parseIntentFromText(normalized, options.businessProfile)) {
+    return { kind: "lookup", text: normalized };
+  }
+
   if (context?.intent) {
     return { kind: "lookup", text: `${normalized} ${intentPrompt(context.intent, options.businessProfile)}` };
   }

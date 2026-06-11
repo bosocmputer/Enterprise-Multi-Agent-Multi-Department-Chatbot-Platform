@@ -198,4 +198,28 @@ describe("chat context helpers", () => {
       text: "ปูนตราช้าง มีไหม"
     });
   });
+
+  it("does not append prior context intent when the new message has an explicit intent", async () => {
+    const store = new MemoryCacheService();
+    await saveLookupContext({
+      contextStore: store,
+      key: "k",
+      result: {
+        cacheHit: false,
+        datasetLabel: "test",
+        intent: "stock",
+        product: { code: "PAINT-01424", name: "Beger น้ำมันสน" },
+        status: "success",
+        tenantStatus: "real"
+      },
+      ttlSeconds: 300
+    });
+
+    await expect(
+      resolveTextWithContext({ businessProfile: profile, contextStore: store, key: "k", text: "PAINT-01424 ราคา" })
+    ).resolves.toEqual({
+      kind: "lookup",
+      text: "PAINT-01424 ราคา"
+    });
+  });
 });
