@@ -245,6 +245,38 @@ describe("LookupOrchestrator", () => {
     expect(llmCalls).toBe(0);
   });
 
+  it("does not call SML or LLM for out-of-scope current information", async () => {
+    let smlCalls = 0;
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        llmCalls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => {
+          smlCalls += 1;
+          return [];
+        }
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "ราคาทองวันนี้เท่าไหร่" })).resolves.toMatchObject({
+      conversationScope: "out_of_scope_current_info",
+      outOfScopeCategory: "current_info",
+      parserPath: "none",
+      replyPolicy: "refuse_redirect",
+      status: "unsupported"
+    });
+    expect(smlCalls).toBe(0);
+    expect(llmCalls).toBe(0);
+  });
+
   it("retries deterministic no-match once with LLM assist search terms", async () => {
     const requestedTerms: string[] = [];
     let llmCalls = 0;

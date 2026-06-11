@@ -96,6 +96,40 @@ describe("response formatter", () => {
     expect(reply.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(0);
   });
 
+  it("formats out-of-scope current info as a polite redirect", () => {
+    const reply = formatLookupReply(
+      {
+        conversationScope: "out_of_scope_current_info",
+        outOfScopeCategory: "current_info",
+        parserPath: "none",
+        reason: "out_of_scope_current_info",
+        replyPolicy: "refuse_redirect",
+        status: "unsupported"
+      },
+      profile
+    );
+
+    expect(reply).toContain("ข้อมูลภายนอกยังไม่รองรับ");
+    expect(reply).toContain("ส่งชื่อสินค้า");
+  });
+
+  it("formats out-of-scope general chat as a polite redirect", () => {
+    const reply = formatLookupReply(
+      {
+        conversationScope: "out_of_scope_general",
+        outOfScopeCategory: "general",
+        parserPath: "none",
+        reason: "out_of_scope_general",
+        replyPolicy: "refuse_redirect",
+        status: "unsupported"
+      },
+      profile
+    );
+
+    expect(reply).toContain("คำถามทั่วไป");
+    expect(reply).toContain("ส่งชื่อสินค้า");
+  });
+
   it("uses generic source-system wording for dependency failures", () => {
     const reply = formatLookupReply(
       {

@@ -2,6 +2,26 @@ export type LookupIntent = "search_product" | "stock" | "price" | "stock_price";
 
 export type LookupActionId = string;
 
+export type ConversationScope =
+  | "friendly"
+  | "help"
+  | "lookup_like"
+  | "out_of_scope_current_info"
+  | "out_of_scope_general";
+
+export type OutOfScopeCategory = "current_info" | "general" | "none";
+
+export type ParserPath = "deterministic" | "llm_assist" | "none";
+
+export type ReplyPolicy = "friendly" | "help" | "lookup" | "refuse_redirect";
+
+export interface ConversationMetadata {
+  conversationScope?: ConversationScope;
+  outOfScopeCategory?: OutOfScopeCategory;
+  parserPath?: ParserPath;
+  replyPolicy?: ReplyPolicy;
+}
+
 export interface EntityCandidate {
   description?: string;
   id: string;
@@ -49,11 +69,19 @@ export type ParseOutcome =
       searchTerms: string[];
       assist?: LlmAssistInfo;
       source?: "deterministic" | "llm";
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
     }
   | {
       status: "unsupported";
       reason: string;
       assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
     };
 
 export interface ProductCandidate {
@@ -108,6 +136,10 @@ export type LookupResult =
       tenantId?: string;
       tenantStatus: "demo" | "real";
       assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
     }
   | {
       status: "no_match";
@@ -118,6 +150,10 @@ export type LookupResult =
       source?: string;
       tenantId?: string;
       assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
     }
   | {
       status: "multiple_matches";
@@ -135,6 +171,10 @@ export type LookupResult =
       tenantId?: string;
       totalFound?: number;
       assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
     }
   | {
       status: "unsupported";
@@ -144,6 +184,10 @@ export type LookupResult =
       source?: string;
       tenantId?: string;
       assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
     }
   | {
       status: "dependency_error";
@@ -153,4 +197,8 @@ export type LookupResult =
       source?: string;
       tenantId?: string;
       assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
     };

@@ -16,7 +16,40 @@ describe("chat context helpers", () => {
   it("answers thanks without sending them to lookup", async () => {
     await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "ขอบคุณ" })).resolves.toMatchObject({
       kind: "reply",
-      text: expect.stringContaining("ส่งชื่อสินค้า")
+      replyPolicy: "friendly",
+      text: expect.stringContaining("ยินดี")
+    });
+  });
+
+  it("answers acknowledgements with separate profile copy", async () => {
+    await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "โอเค" })).resolves.toMatchObject({
+      kind: "reply",
+      replyPolicy: "friendly",
+      text: expect.stringContaining("รับทราบ")
+    });
+  });
+
+  it("refuses current external information without sending it to lookup", async () => {
+    await expect(
+      resolveTextWithContext({ businessProfile: profile, key: "k", text: "อากาศวันนี้เป็นยังไง" })
+    ).resolves.toMatchObject({
+      conversationScope: "out_of_scope_current_info",
+      kind: "reply",
+      outOfScopeCategory: "current_info",
+      parserPath: "none",
+      replyPolicy: "refuse_redirect",
+      text: expect.stringContaining("ข้อมูลภายนอกยังไม่รองรับ")
+    });
+  });
+
+  it("refuses general chat without sending it to lookup", async () => {
+    await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "กินอะไรดี" })).resolves.toMatchObject({
+      conversationScope: "out_of_scope_general",
+      kind: "reply",
+      outOfScopeCategory: "general",
+      parserPath: "none",
+      replyPolicy: "refuse_redirect",
+      text: expect.stringContaining("คำถามทั่วไป")
     });
   });
 

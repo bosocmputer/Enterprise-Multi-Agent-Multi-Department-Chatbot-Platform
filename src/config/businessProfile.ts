@@ -26,6 +26,12 @@ const defaultReplyStyle = {
   noMoreResultsPrompt: "แสดงรายการชุดนี้ครบแล้วครับ ถ้ายังไม่เจอ ลองส่งคำค้นให้เฉพาะเจาะจงขึ้น",
   refineMoreResultsPrompt: "ยังมีรายการมากกว่านี้ กรุณาเพิ่มรุ่น ยี่ห้อ ขนาด หรือรหัสให้ชัดขึ้น",
   sourceTruthFooter: "ข้อมูลจริงมาจากระบบต้นทาง",
+  acknowledgementMessage: "รับทราบครับ ส่งรายการถัดไปมาได้เลยครับ",
+  outOfScopeCurrentInfoMessage:
+    "ผมช่วยเช็กข้อมูลจากระบบร้านได้ครับ เรื่องอากาศ ข่าว หรือข้อมูลภายนอกยังไม่รองรับ ส่งรหัส ชื่อ รุ่น ยี่ห้อ หรือคำค้นมาได้เลยครับ",
+  outOfScopeMessage:
+    "ผมช่วยเช็กข้อมูลจากระบบร้านได้ครับ คำถามทั่วไปนอกงาน lookup ยังไม่รองรับ ส่งรหัส ชื่อ รุ่น ยี่ห้อ หรือคำค้นมาได้เลยครับ",
+  thanksMessage: "ยินดีครับ ส่งรายการถัดไปมาได้เลยครับ",
   unsupportedMessage: "ผมยังไม่แน่ใจว่าต้องการค้นหาอะไร กรุณาส่งรหัส ชื่อ รุ่น ยี่ห้อ หรือคำค้นให้ชัดขึ้น"
 };
 
@@ -119,8 +125,12 @@ export const businessProfileSchema = z
         multiMatchPrompt: z.string().default(defaultReplyStyle.multiMatchPrompt),
         noContextPrompt: z.string().default(defaultReplyStyle.noContextPrompt),
         noMoreResultsPrompt: z.string().default(defaultReplyStyle.noMoreResultsPrompt),
+        acknowledgementMessage: z.string().default(defaultReplyStyle.acknowledgementMessage),
+        outOfScopeCurrentInfoMessage: z.string().default(defaultReplyStyle.outOfScopeCurrentInfoMessage),
+        outOfScopeMessage: z.string().default(defaultReplyStyle.outOfScopeMessage),
         refineMoreResultsPrompt: z.string().default(defaultReplyStyle.refineMoreResultsPrompt),
         sourceTruthFooter: z.string().default(defaultReplyStyle.sourceTruthFooter),
+        thanksMessage: z.string().default(defaultReplyStyle.thanksMessage),
         unsupportedMessage: z.string().default(defaultReplyStyle.unsupportedMessage)
       })
       .default(defaultReplyStyle),

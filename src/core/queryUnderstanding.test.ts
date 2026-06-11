@@ -81,6 +81,64 @@ describe("understandLookupQuery", () => {
     expect(calls).toBe(0);
   });
 
+  it("blocks current-info questions before deterministic parser or LLM assist", async () => {
+    let calls = 0;
+    const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        calls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+
+    await expect(
+      understandLookupQuery("ราคาทองวันนี้เท่าไหร่", profile, {
+        llmParser: parser,
+        llmParserMode: "assist"
+      })
+    ).resolves.toMatchObject({
+      conversationScope: "out_of_scope_current_info",
+      outOfScopeCategory: "current_info",
+      parserPath: "none",
+      reason: "out_of_scope_current_info",
+      replyPolicy: "refuse_redirect",
+      status: "unsupported"
+    });
+    expect(calls).toBe(0);
+  });
+
+  it("allows lookup-like natural questions to use LLM assist", async () => {
+    let calls = 0;
+    const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        calls += 1;
+        return {
+          confidence: 0.9,
+          intent: "price",
+          keyword: "น้ำมันสน",
+          searchTerms: ["น้ำมันสน"],
+          status: "parsed"
+        };
+      }
+    };
+
+    await expect(
+      understandLookupQuery("ช่วยดูน้ำมันสนให้หน่อย", profile, {
+        llmParser: parser,
+        llmParserMode: "assist"
+      })
+    ).resolves.toMatchObject({
+      conversationScope: "lookup_like",
+      intent: "price",
+      keyword: "น้ำมันสน",
+      parserPath: "llm_assist",
+      replyPolicy: "lookup",
+      status: "parsed"
+    });
+    expect(calls).toBe(1);
+  });
+
   it("falls back to unsupported when LLM is rejected", async () => {
     const parser: LookupLlmParser = {
       metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },

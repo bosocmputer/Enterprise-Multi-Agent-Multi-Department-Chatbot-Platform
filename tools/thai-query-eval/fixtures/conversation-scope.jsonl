@@ -1,0 +1,10 @@
+{"id":"scope-001","text":"อากาศวันนี้เป็นยังไง","expectedScope":"out_of_scope_current_info","expectedPolicy":"refuse_redirect","expectedParserPath":"none","source":"reviewed_manual_fixture"}
+{"id":"scope-002","text":"ฝนตกไหม","expectedScope":"out_of_scope_current_info","expectedPolicy":"refuse_redirect","expectedParserPath":"none","source":"reviewed_manual_fixture"}
+{"id":"scope-003","text":"ข่าววันนี้มีอะไร","expectedScope":"out_of_scope_current_info","expectedPolicy":"refuse_redirect","expectedParserPath":"none","source":"reviewed_manual_fixture"}
+{"id":"scope-004","text":"กินอะไรดี","expectedScope":"out_of_scope_general","expectedPolicy":"refuse_redirect","expectedParserPath":"none","source":"reviewed_manual_fixture"}
+{"id":"scope-005","text":"เล่าเรื่องตลกหน่อย","expectedScope":"out_of_scope_general","expectedPolicy":"refuse_redirect","expectedParserPath":"none","source":"reviewed_manual_fixture"}
+{"id":"scope-006","text":"มีปูนเหลือไหม","expectedScope":"lookup_like","expectedPolicy":"lookup","expectedParserPath":"deterministic","source":"reviewed_manual_fixture"}
+{"id":"scope-007","text":"น้ำมัน ราคา","expectedScope":"lookup_like","expectedPolicy":"lookup","expectedParserPath":"deterministic","source":"reviewed_manual_fixture"}
+{"id":"scope-008","text":"PAINT-01424 ราคา","expectedScope":"lookup_like","expectedPolicy":"lookup","expectedParserPath":"deterministic","source":"reviewed_manual_fixture"}
+{"id":"scope-009","text":"ตัวนี้ราคาเท่าไหร่","expectedScope":"lookup_like","expectedPolicy":"lookup","expectedParserPath":"none","source":"reviewed_manual_fixture"}
+{"id":"scope-010","text":"เอาแบบถูกสุดมีไหม","expectedScope":"lookup_like","expectedPolicy":"lookup","expectedParserPath":"none","source":"reviewed_manual_fixture"}

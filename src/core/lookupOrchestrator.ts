@@ -13,6 +13,7 @@ import { runLlmParseWithTelemetry } from "./llmParser.js";
 import { assistInfo, startAssist, understandLookupQuery } from "./queryUnderstanding.js";
 import { attachEntities, attachEntity, entitiesFromProducts } from "./entityAdapter.js";
 import type {
+  ConversationMetadata,
   LlmAssistInfo,
   LlmAssistStartEvent,
   LookupActionId,
@@ -97,7 +98,7 @@ export class LookupOrchestrator {
         status: "unsupported",
         reason: parsed.reason,
         assist: parsed.assist,
-        ...this.unsupportedMetadata()
+        ...this.unsupportedMetadata(parsed)
       };
     }
     const metadata = this.metadataForParsed(parsed);
@@ -126,7 +127,8 @@ export class LookupOrchestrator {
             intent: parsed.intent,
             keyword: parsed.keyword,
             assist: assisted?.assist,
-            ...metadata
+            ...metadata,
+            parserPath: assisted?.assist ? "llm_assist" : metadata.parserPath
           };
         }
       }
@@ -363,25 +365,37 @@ export class LookupOrchestrator {
 
   private metadataForParsed(parsed: ParsedLookup): {
     action?: LookupActionId;
+    conversationScope: "lookup_like";
     entityType: string;
+    outOfScopeCategory: "none";
+    parserPath: "deterministic" | "llm_assist";
+    replyPolicy: "lookup";
     source: string;
     tenantId: string;
   } {
     return {
       action: parsed.action ?? actionForLegacyIntent(this.businessProfile, parsed.intent)?.id,
+      conversationScope: "lookup_like",
       entityType: parsed.entityType ?? this.domainProfile.defaultEntityType,
+      outOfScopeCategory: "none",
+      parserPath: parsed.source === "llm" || parsed.assist?.status === "parsed" ? "llm_assist" : "deterministic",
+      replyPolicy: "lookup",
       source: this.source,
       tenantId: this.tenantId
     };
   }
 
-  private unsupportedMetadata(): {
+  private unsupportedMetadata(parsed: Extract<ParseOutcome, { status: "unsupported" }>): {
     entityType: string;
     source: string;
     tenantId: string;
-  } {
+  } & ConversationMetadata {
     return {
+      conversationScope: parsed.conversationScope ?? "lookup_like",
       entityType: this.domainProfile.defaultEntityType,
+      outOfScopeCategory: parsed.outOfScopeCategory ?? "none",
+      parserPath: parsed.parserPath ?? (parsed.assist ? "llm_assist" : "none"),
+      replyPolicy: parsed.replyPolicy ?? "lookup",
       source: this.source,
       tenantId: this.tenantId
     };
@@ -391,7 +405,16 @@ export class LookupOrchestrator {
 function multipleMatches(
   parsed: ParsedLookup,
   searchResult: CandidateSearchResult,
-  metadata: { action?: LookupActionId; entityType: string; source: string; tenantId: string }
+  metadata: {
+    action?: LookupActionId;
+    conversationScope: "lookup_like";
+    entityType: string;
+    outOfScopeCategory: "none";
+    parserPath: "deterministic" | "llm_assist";
+    replyPolicy: "lookup";
+    source: string;
+    tenantId: string;
+  }
 ): LookupResult {
   const totalFound = searchResult.totalFound ?? searchResult.candidates.length;
   const pageSize = MULTI_MATCH_PAGE_SIZE;

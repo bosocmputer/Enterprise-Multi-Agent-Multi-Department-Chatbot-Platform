@@ -17,7 +17,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 | Area | Required cases |
 | --- | --- |
 | Business Profile | schema validation, missing profile, disabled intent, Domain Profile v2 normalization, required entity/action/read-only connector mapping, read-only connector allowlist, tenant examples, alias expansion, invalid profile rollback behavior. |
-| Query parser/understanding | tenant action/entity/query extraction, stock, price, stock+price, search-only, unsupported text, friendly non-lookup guard, Thai/English variants from Business Profile, entity ID, barcode-like input, context-only follow-up. |
+| Query parser/understanding | tenant action/entity/query extraction, stock, price, stock+price, search-only, unsupported text, friendly non-lookup guard, out-of-scope current/general question guard, Thai/English variants from Business Profile, entity ID, barcode-like input, context-only follow-up. |
 | LLM slow-path parser | LiteLLM request shape, generic JSON parser output, malformed JSON, wrong enum/action, empty query/searchTerms, low confidence, timeout, truncated completion, shadow mode no user-facing change, assist status/footer/failure copy. |
 | Thai query evaluation | PyThaiNLP tokenization fixture, custom dictionary from Business Profile aliases/examples, sensitive-key rejection, context-required phrase suggestions. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
@@ -29,7 +29,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 Latest local run on 2026-06-11:
 
-- `npm test`: 18 files, 106 tests passed.
+- `npm test`: 18 files, 116 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -66,18 +66,19 @@ Current covered cases:
 - Telegram assist status sends at most one typing/status message for slow-path assist and does not send one for clear fast-path lookups.
 - LINE assist status starts loading animation only for one-on-one slow-path assist.
 - `/internal/parse` requires internal bearer auth and returns parser output without calling SML.
-- Offline Thai query evaluation fixture exists for `มีปูนตราช้างเหลือไหม`, `ปูนตราช้าง`, `เอาแบบถูกสุดมีไหม`, `ตัวนี้ราคาเท่าไหร่`, `น้ำมัน ราคา`, and `PAINT-01424 ราคา`.
+- Offline Thai query evaluation fixtures exist for lookup quality and conversation scope, including weather/news/general-chat out-of-scope cases plus normal lookup cases.
 - Context guard replies with clarification for vague references such as `ตัวนี้ราคาเท่าไหร่` when no product context exists.
 - Context guard resolves `ตัวนี้ราคาเท่าไหร่` against the last product when safe.
 - Selection constraints such as `เอาแบบถูกสุดมีไหม` do not trigger SML search without enough context.
 - Greeting/thanks/help-style messages return profile-driven friendly copy and do not call LLM/SML.
+- Out-of-scope current information and general chat return a polite redirect, do not call LLM/SML, and emit conversation-scope metrics.
 - Assist failure messages do not expose raw provider outcomes such as `provider_error` or `rejected_timeout` to users.
 - Multi-match replies ask the user to refine when the source reports more results than the local candidate buffer can page through.
 - Known bare Business Profile terms such as `ปูนตราช้าง` become search lookups instead of generic help.
 - Domain Profile v2 drives action/entity metadata and command aliases without source edits.
 - Mock auto-parts profile uses the same lookup core with a mocked connector client, proving the core is not bound to construction-materials data.
 - Runtime source isolation test blocks tenant-specific vocabulary from non-test TypeScript source.
-- Lookup metrics include `tenant`, `entity_type`, `action`, `source`, and `confidence_band` labels.
+- Lookup metrics include `tenant`, `entity_type`, `action`, `source`, `confidence_band`, `conversation_scope`, `out_of_scope_category`, `parser_path`, and `reply_policy` labels.
 
 Optional local Thai query evaluation gate:
 

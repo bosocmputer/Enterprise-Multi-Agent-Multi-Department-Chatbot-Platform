@@ -129,6 +129,7 @@ Rules:
 | Group message without gate | Ignore silently. |
 | Parser cannot find intent | Reply with profile-driven unsupported/help-lite copy; do not invent lookup facts. |
 | Friendly non-lookup text | Greeting, thanks, acknowledgement, help-style, sticker-only, or emoji-only messages return profile-driven friendly copy and do not call LLM/SML. |
+| Out-of-scope current/general question | Weather, news, lottery, exchange rate, recipes, jokes, or other non-lookup questions get a polite redirect back to tenant lookup. Do not call SML or LiteLLM stock/price parser. |
 | LLM parser invalid/timeout | Treat as unsupported or no-match; if configured, show safe assist failure copy without raw provider outcomes, raw prompt, raw provider payload, token, or source facts. Keep true outcomes in logs/metrics. |
 | No entity found | Ask for clearer ID, model, descriptor, or keyword. |
 | Multiple entities found | Present current-page choices and ask the user to choose. If the local candidate buffer is exhausted while the source reports more matches, ask the user to refine the query. |

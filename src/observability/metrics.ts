@@ -1,4 +1,4 @@
-import type { LookupResult } from "../core/types.js";
+import type { ConversationMetadata, LookupResult } from "../core/types.js";
 
 type Labels = Record<string, string | number | boolean | undefined>;
 
@@ -63,9 +63,13 @@ export class MetricsRegistry {
       action: "action" in result ? result.action ?? "none" : "none",
       channel,
       confidence_band: confidenceBand(result),
+      conversation_scope: conversationScope(result),
       entity_type: "entityType" in result ? result.entityType ?? "unknown" : "unknown",
       intent: "intent" in result ? result.intent : "none",
       cache_hit: "cacheHit" in result ? String(result.cacheHit) : "none",
+      out_of_scope_category: result.outOfScopeCategory ?? "none",
+      parser_path: parserPath(result),
+      reply_policy: replyPolicy(result),
       source: "source" in result ? result.source ?? "unknown" : "unknown",
       status: result.status,
       tenant: "tenantId" in result ? result.tenantId ?? "unknown" : "unknown"
@@ -84,6 +88,17 @@ export class MetricsRegistry {
       channel,
       outcome,
       reason
+    });
+  }
+
+  recordConversationScope(channel: string, tenant: string, metadata: ConversationMetadata = {}): void {
+    this.counter("parts_lookup_conversation_scope_total", "Conversation scope outcomes by channel and reply policy.", {
+      channel,
+      conversation_scope: metadata.conversationScope ?? "lookup_like",
+      out_of_scope_category: metadata.outOfScopeCategory ?? "none",
+      parser_path: metadata.parserPath ?? "none",
+      reply_policy: metadata.replyPolicy ?? "lookup",
+      tenant
     });
   }
 
@@ -199,4 +214,19 @@ function confidenceBand(result: LookupResult): "high" | "low" | "medium" | "none
   if ("assist" in result && result.assist?.status === "rejected") return "low";
   if (result.status === "unsupported" || result.status === "dependency_error") return "none";
   return "high";
+}
+
+function conversationScope(result: LookupResult): string {
+  return result.conversationScope ?? (result.status === "unsupported" ? "lookup_like" : "lookup_like");
+}
+
+function parserPath(result: LookupResult): string {
+  if (result.parserPath) return result.parserPath;
+  if (result.assist) return "llm_assist";
+  if (result.status === "unsupported") return "none";
+  return "deterministic";
+}
+
+function replyPolicy(result: LookupResult): string {
+  return result.replyPolicy ?? (result.status === "unsupported" ? "help" : "lookup");
 }

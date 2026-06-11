@@ -4,6 +4,7 @@ import { alertOnLookupDependencyError, type AlertSender } from "./channelAlerts.
 import { resolveTextWithContext, saveLookupContext } from "./chatContext.js";
 import type { BusinessProfile } from "../config/businessProfile.js";
 import { formatAssistStartingMessage } from "../core/assistFormatting.js";
+import { hashIdentifier, hashText } from "../core/hash.js";
 import type { LlmParserMode, LookupLlmParser } from "../core/llmParser.js";
 import type { LookupOrchestrator } from "../core/lookupOrchestrator.js";
 import { runLookupWithTelemetry } from "../core/lookupTelemetry.js";
@@ -137,6 +138,22 @@ export class TelegramAdapter {
     if (resolved.kind === "reply") {
       await this.sendMessage(String(message.chat.id), resolved.text, message.message_id);
       this.options.metrics?.recordTelegramUpdate("handled", "context_reply");
+      this.options.metrics?.recordConversationScope("telegram", this.options.businessProfile.tenantId, resolved);
+      this.options.logger?.info(
+        {
+          channel: "telegram",
+          chatHash: hashIdentifier(chatId),
+          conversationScope: resolved.conversationScope,
+          outOfScopeCategory: resolved.outOfScopeCategory,
+          parserPath: resolved.parserPath,
+          replyPolicy: resolved.replyPolicy,
+          status: "context_reply",
+          tenantId: this.options.businessProfile.tenantId,
+          textHash: hashText(message.text),
+          userHash: hashIdentifier(message.from?.id ? String(message.from.id) : undefined)
+        },
+        "context reply completed"
+      );
       return { ignored: false, updateId: update.update_id };
     }
 

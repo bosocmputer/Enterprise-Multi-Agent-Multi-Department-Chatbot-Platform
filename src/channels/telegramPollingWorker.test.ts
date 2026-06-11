@@ -3,6 +3,7 @@ import { loadBusinessProfile } from "../config/businessProfile.js";
 import { LookupOrchestrator } from "../core/lookupOrchestrator.js";
 import { SmlClient } from "../integrations/smlClient.js";
 import { createLogger } from "../observability/logger.js";
+import { MetricsRegistry } from "../observability/metrics.js";
 import { MemoryCacheService } from "../services/cacheService.js";
 import type { AlertSender } from "./channelAlerts.js";
 import { TelegramAdapter } from "./telegramAdapter.js";
@@ -176,6 +177,70 @@ describe("TelegramPollingWorker", () => {
     expect(sentMessages[0]?.text).toContain("เจอหลายรายการ");
     expect(sentMessages[1]?.text).toContain("A001 - สินค้า A");
     expect(sentMessages[1]?.text).toContain("77");
+  });
+
+  it("handles out-of-scope duplicate updates without sending duplicate replies", async () => {
+    const state = new MemoryCacheService();
+    const metrics = new MetricsRegistry();
+    const sentMessages: Array<{ text: string }> = [];
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/getUpdates")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: [
+              {
+                update_id: 30,
+                message: {
+                  message_id: 40,
+                  text: "อากาศวันนี้เป็นยังไง",
+                  chat: { id: 100, type: "private" },
+                  from: { id: 1, is_bot: false }
+                }
+              },
+              {
+                update_id: 30,
+                message: {
+                  message_id: 41,
+                  text: "อากาศวันนี้เป็นยังไง",
+                  chat: { id: 100, type: "private" },
+                  from: { id: 1, is_bot: false }
+                }
+              }
+            ]
+          })
+        );
+      }
+
+      if (url.includes("/sendMessage")) {
+        sentMessages.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    const adapter = new TelegramAdapter({
+      botToken: "test-token",
+      businessProfile: profile,
+      dedupStore: state,
+      fetchImpl,
+      metrics
+    });
+    const worker = new TelegramPollingWorker(adapter, createLookup(), {
+      intervalMs: 1,
+      timeoutSeconds: 0,
+      logger: createLogger({ LOG_LEVEL: "silent" })
+    });
+
+    await expect(worker.pollOnce()).resolves.toEqual({ received: 2, handled: 1, ignored: 1 });
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]?.text).toContain("ข้อมูลภายนอกยังไม่รองรับ");
+    const rendered = metrics.renderPrometheus();
+    expect(rendered).toContain('conversation_scope="out_of_scope_current_info"');
+    expect(rendered).toContain('reply_policy="refuse_redirect"');
   });
 
   it("alerts when SML lookup fails and the user receives a safe fallback", async () => {

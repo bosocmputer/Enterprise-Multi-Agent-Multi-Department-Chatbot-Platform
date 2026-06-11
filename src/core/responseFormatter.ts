@@ -113,9 +113,11 @@ function formatUnsupportedReply(reason: string, profile?: BusinessProfile): stri
 
   const friendlyKind = nonLookupKindFromReason(reason);
   if (friendlyKind === "help_question") return formatBusinessProfileHelp(profile);
-  if (friendlyKind === "greeting" || friendlyKind === "thanks" || friendlyKind === "acknowledgement") {
-    return profile.replyStyle.greetingMessage;
-  }
+  if (friendlyKind === "greeting") return profile.replyStyle.greetingMessage;
+  if (friendlyKind === "thanks") return profile.replyStyle.thanksMessage;
+  if (friendlyKind === "acknowledgement") return profile.replyStyle.acknowledgementMessage;
+  if (friendlyKind === "out_of_scope_current_info") return profile.replyStyle.outOfScopeCurrentInfoMessage;
+  if (friendlyKind === "out_of_scope_general") return profile.replyStyle.outOfScopeMessage;
   if (friendlyKind === "empty" || friendlyKind === "emoji_only") return profile.replyStyle.unsupportedMessage;
 
   const lines = [profile.replyStyle.unsupportedMessage, profile.replyStyle.lookupHintMessage].filter(

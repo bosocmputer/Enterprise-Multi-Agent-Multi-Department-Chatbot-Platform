@@ -4,6 +4,7 @@ import { z } from "zod";
 import { alertOnLookupDependencyError, type AlertSender } from "./channelAlerts.js";
 import { resolveTextWithContext, saveLookupContext } from "./chatContext.js";
 import type { BusinessProfile } from "../config/businessProfile.js";
+import { hashIdentifier, hashText } from "../core/hash.js";
 import type { LlmParserMode, LookupLlmParser } from "../core/llmParser.js";
 import type { LookupOrchestrator } from "../core/lookupOrchestrator.js";
 import { runLookupWithTelemetry } from "../core/lookupTelemetry.js";
@@ -162,6 +163,22 @@ export class LineAdapter {
     if (resolved.kind === "reply") {
       await this.reply(event.replyToken, resolved.text);
       this.options.metrics?.recordChannelUpdate("line", "handled", "context_reply");
+      this.options.metrics?.recordConversationScope("line", this.options.businessProfile.tenantId, resolved);
+      this.options.logger?.info(
+        {
+          channel: "line",
+          chatHash: hashIdentifier(chatId),
+          conversationScope: resolved.conversationScope,
+          outOfScopeCategory: resolved.outOfScopeCategory,
+          parserPath: resolved.parserPath,
+          replyPolicy: resolved.replyPolicy,
+          status: "context_reply",
+          tenantId: this.options.businessProfile.tenantId,
+          textHash: hashText(gatedText),
+          userHash: hashIdentifier(userId)
+        },
+        "context reply completed"
+      );
       return true;
     }
 

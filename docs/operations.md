@@ -17,6 +17,7 @@ Expose at least:
 | Metric | Why it matters |
 | --- | --- |
 | `parts_lookup_requests_total{channel,status,intent,cache_hit}` | Traffic by channel and outcome. |
+| `parts_lookup_conversation_scope_total{channel,tenant,conversation_scope,out_of_scope_category,parser_path,reply_policy}` | Friendly/help/out-of-scope/context replies that may not enter the SML lookup path. |
 | `parts_lookup_channel_updates_total{channel,outcome,reason}` | Telegram/LINE event handling, ignored chatter, duplicates, rate limits. |
 | `parts_lookup_telegram_updates_total{outcome,reason}` | Group gate, duplicate, rate-limit, and handled update behavior. |
 | `parts_lookup_duration_ms{channel,status,intent,cache_hit}` | End-to-end lookup performance. |

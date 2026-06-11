@@ -3,7 +3,12 @@ import type { BusinessProfile } from "../config/businessProfile.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
 import type { LlmParseResult, LlmParserMode, LookupLlmParser } from "./llmParser.js";
 import { llmParseOutcome, runLlmParseWithTelemetry } from "./llmParser.js";
-import { classifyNonLookupText, friendlyUnsupportedReason } from "./nonLookupGuard.js";
+import {
+  classifyNonLookupText,
+  friendlyUnsupportedReason,
+  isOutOfScopeKind,
+  metadataForNonLookupKind
+} from "./nonLookupGuard.js";
 import { parseLookupQuery } from "./queryParser.js";
 import type { LlmAssistInfo, LlmAssistReason, LlmAssistStartEvent, ParseOutcome } from "./types.js";
 
@@ -22,10 +27,33 @@ export async function understandLookupQuery(
   profile: BusinessProfile,
   options: QueryUnderstandingOptions
 ): Promise<ParseOutcome> {
+  const preParserNonLookup = classifyNonLookupText(text);
+  if (isOutOfScopeKind(preParserNonLookup)) {
+    return {
+      status: "unsupported",
+      reason: friendlyUnsupportedReason(preParserNonLookup),
+      ...metadataForNonLookupKind(preParserNonLookup)
+    };
+  }
+
   const deterministic = parseLookupQuery(text, profile);
-  if (deterministic.status === "parsed") return deterministic;
-  const nonLookup = classifyNonLookupText(text);
-  if (nonLookup) return { status: "unsupported", reason: friendlyUnsupportedReason(nonLookup) };
+  if (deterministic.status === "parsed") {
+    return {
+      ...deterministic,
+      conversationScope: "lookup_like",
+      outOfScopeCategory: "none",
+      parserPath: "deterministic",
+      replyPolicy: "lookup"
+    };
+  }
+  const nonLookup = preParserNonLookup;
+  if (nonLookup) {
+    return {
+      status: "unsupported",
+      reason: friendlyUnsupportedReason(nonLookup),
+      ...metadataForNonLookupKind(nonLookup)
+    };
+  }
   if (options.llmParserMode !== "assist" || !options.llmParser) return deterministic;
 
   const assistStart = startAssist(options.llmParser, "unsupported", options);
@@ -57,7 +85,11 @@ export async function understandLookupQuery(
     query: llmParsed.query,
     searchTerms: llmParsed.searchTerms,
     assist,
-    source: "llm"
+    source: "llm",
+    conversationScope: "lookup_like",
+    outOfScopeCategory: "none",
+    parserPath: "llm_assist",
+    replyPolicy: "lookup"
   };
 }
 

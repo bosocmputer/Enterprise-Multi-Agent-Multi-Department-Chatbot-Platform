@@ -4,9 +4,21 @@ import {
   phrasesForLegacyIntent,
   type BusinessProfile
 } from "../config/businessProfile.js";
-import { classifyNonLookupText, type NonLookupKind } from "../core/nonLookupGuard.js";
+import {
+  classifyNonLookupText,
+  isOutOfScopeKind,
+  metadataForNonLookupKind,
+  type NonLookupKind
+} from "../core/nonLookupGuard.js";
 import { formatMultipleMatches } from "../core/responseFormatter.js";
-import type { EntityCandidate, LookupActionId, LookupIntent, LookupResult, ProductCandidate } from "../core/types.js";
+import type {
+  ConversationMetadata,
+  EntityCandidate,
+  LookupActionId,
+  LookupIntent,
+  LookupResult,
+  ProductCandidate
+} from "../core/types.js";
 import type { CacheService } from "../services/cacheService.js";
 
 export interface ChatContext {
@@ -25,7 +37,7 @@ export interface ChatContext {
 
 export type ContextResolution =
   | { kind: "lookup"; text: string }
-  | { kind: "reply"; text: string };
+  | ({ kind: "reply"; text: string } & ConversationMetadata);
 
 export async function resolveTextWithContext(options: {
   businessProfile: BusinessProfile;
@@ -36,11 +48,14 @@ export async function resolveTextWithContext(options: {
 }): Promise<ContextResolution> {
   const normalized = options.text.trim();
   if (isHelpText(normalized)) {
-    return { kind: "reply", text: helpText(options.businessProfile) };
+    return reply(helpText(options.businessProfile), helpMetadata());
   }
   const nonLookup = classifyNonLookupText(normalized);
-  if (nonLookup && !parseIntentFromText(normalized, options.businessProfile) && !parseExactCode(normalized)) {
-    return { kind: "reply", text: nonLookupReply(options.businessProfile, nonLookup) };
+  if (
+    nonLookup &&
+    (isOutOfScopeKind(nonLookup) || (!parseIntentFromText(normalized, options.businessProfile) && !parseExactCode(normalized)))
+  ) {
+    return reply(nonLookupReply(options.businessProfile, nonLookup), metadataForNonLookupKind(nonLookup));
   }
 
   const context = await options.contextStore?.get<ChatContext>(options.key);
@@ -59,7 +74,8 @@ export async function resolveTextWithContext(options: {
     if (!context?.candidates?.length) {
       return {
         kind: "reply",
-        text: options.businessProfile.replyStyle.noContextPrompt
+        text: options.businessProfile.replyStyle.noContextPrompt,
+        ...lookupContextReplyMetadata()
       };
     }
     const pageStart = context.candidatePageStart ?? 0;
@@ -69,12 +85,13 @@ export async function resolveTextWithContext(options: {
       const keyword = context.keyword ? ` สำหรับ "${context.keyword}"` : "";
       return {
         kind: "reply",
-        text: `กรุณาเลือกเลข 1-${visibleCount || 1}${keyword} หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
+        text: `กรุณาเลือกเลข 1-${visibleCount || 1}${keyword} หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`,
+        ...lookupContextReplyMetadata()
       };
     }
     const selected = context.candidates[pageStart + numericSelection];
     if (!selected) {
-      return { kind: "reply", text: options.businessProfile.replyStyle.noContextPrompt };
+      return reply(options.businessProfile.replyStyle.noContextPrompt, lookupContextReplyMetadata());
     }
     return {
       kind: "lookup",
@@ -103,7 +120,8 @@ export async function resolveTextWithContext(options: {
     if (!context?.lastProduct) {
       return {
         kind: "reply",
-        text: options.businessProfile.replyStyle.noContextPrompt
+        text: options.businessProfile.replyStyle.noContextPrompt,
+        ...lookupContextReplyMetadata()
       };
     }
     return { kind: "lookup", text: `${context.lastProduct.code} ${intentPrompt(intentOnly, options.businessProfile)}` };
@@ -224,7 +242,7 @@ async function resolveMoreResults(options: {
   ttlSeconds: number;
 }): Promise<ContextResolution> {
   if (!options.context?.candidates?.length) {
-    return { kind: "reply", text: options.businessProfile.replyStyle.noContextPrompt };
+    return reply(options.businessProfile.replyStyle.noContextPrompt, lookupContextReplyMetadata());
   }
 
   const pageSize = options.context.pageSize ?? 5;
@@ -237,7 +255,8 @@ async function resolveMoreResults(options: {
       text:
         totalFound > options.context.candidates.length
           ? options.businessProfile.replyStyle.refineMoreResultsPrompt
-          : options.businessProfile.replyStyle.noMoreResultsPrompt
+          : options.businessProfile.replyStyle.noMoreResultsPrompt,
+      ...lookupContextReplyMetadata()
     };
   }
 
@@ -261,7 +280,8 @@ async function resolveMoreResults(options: {
       pageStart: nextStart,
       profile: options.businessProfile,
       totalFound: updatedContext.totalFound
-    })
+    }),
+    ...lookupContextReplyMetadata()
   };
 }
 
@@ -282,12 +302,14 @@ function resolveContextRequiredPhrase(options: {
       const visibleCount = visibleCandidateCount(options.context);
       return {
         kind: "reply",
-        text: `ตอนนี้ยังเลือก${options.businessProfile.replyStyle.entityLabel}จากคำว่า "${options.marker}" อัตโนมัติไม่ได้ กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
+        text: `ตอนนี้ยังเลือก${options.businessProfile.replyStyle.entityLabel}จากคำว่า "${options.marker}" อัตโนมัติไม่ได้ กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`,
+        ...lookupContextReplyMetadata()
       };
     }
     return {
       kind: "reply",
-      text: `ตอนนี้ยังเลือก${options.businessProfile.replyStyle.entityLabel}จากคำว่า "${options.marker}" ไม่ได้ กรุณาส่งรายละเอียดหรือ${options.businessProfile.replyStyle.entityIdLabel}ให้ชัดเจนขึ้น`
+      text: `ตอนนี้ยังเลือก${options.businessProfile.replyStyle.entityLabel}จากคำว่า "${options.marker}" ไม่ได้ กรุณาส่งรายละเอียดหรือ${options.businessProfile.replyStyle.entityIdLabel}ให้ชัดเจนขึ้น`,
+      ...lookupContextReplyMetadata()
     };
   }
 
@@ -302,12 +324,14 @@ function resolveContextRequiredPhrase(options: {
     const visibleCount = visibleCandidateCount(options.context);
     return {
       kind: "reply",
-      text: `ยังไม่รู้ว่า "${options.marker}" คือรายการไหน กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
+      text: `ยังไม่รู้ว่า "${options.marker}" คือรายการไหน กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`,
+      ...lookupContextReplyMetadata()
     };
   }
   return {
     kind: "reply",
-    text: options.businessProfile.replyStyle.noContextPrompt
+    text: options.businessProfile.replyStyle.noContextPrompt,
+    ...lookupContextReplyMetadata()
   };
 }
 
@@ -374,8 +398,32 @@ function normalizeText(value: string): string {
 
 function nonLookupReply(profile: BusinessProfile, kind: NonLookupKind): string {
   if (kind === "help_question") return helpText(profile);
-  if (kind === "greeting" || kind === "thanks" || kind === "acknowledgement") {
-    return profile.replyStyle.greetingMessage;
-  }
+  if (kind === "greeting") return profile.replyStyle.greetingMessage;
+  if (kind === "thanks") return profile.replyStyle.thanksMessage;
+  if (kind === "acknowledgement") return profile.replyStyle.acknowledgementMessage;
+  if (kind === "out_of_scope_current_info") return profile.replyStyle.outOfScopeCurrentInfoMessage;
+  if (kind === "out_of_scope_general") return profile.replyStyle.outOfScopeMessage;
   return profile.replyStyle.unsupportedMessage;
+}
+
+function reply(text: string, metadata: ConversationMetadata): ContextResolution {
+  return { kind: "reply", text, ...metadata };
+}
+
+function helpMetadata(): ConversationMetadata {
+  return {
+    conversationScope: "help",
+    outOfScopeCategory: "none",
+    parserPath: "none",
+    replyPolicy: "help"
+  };
+}
+
+function lookupContextReplyMetadata(): ConversationMetadata {
+  return {
+    conversationScope: "lookup_like",
+    outOfScopeCategory: "none",
+    parserPath: "none",
+    replyPolicy: "lookup"
+  };
 }

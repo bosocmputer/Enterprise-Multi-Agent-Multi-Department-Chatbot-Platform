@@ -16,7 +16,7 @@ Last updated: 2026-06-11
 - Server/deploy path: `/home/bosscatdog/parts-lookup-chatbot`
 - Pilot URL: `http://192.168.2.109:3060`
 - Local service port: `3060` by default.
-- Implemented app services: Fastify lookup service, SML read-only client, Domain Profile v2 normalization and validation, generic entity/action contracts, SML inventory adapter, deterministic parser, small-talk/non-lookup guard, context guard for vague Thai follow-ups, optional LiteLLM slow-path parser with assist-mode status UX, response formatter, Redis-backed cache/dedup/rate limit/context state, Telegram polling worker, LINE webhook adapter, optional Telegram webhook route behind env flags, Prometheus-style `/metrics`, Telegram ops alerts.
+- Implemented app services: Fastify lookup service, SML read-only client, Domain Profile v2 normalization and validation, generic entity/action contracts, SML inventory adapter, deterministic parser, small-talk/non-lookup/out-of-scope guard, context guard for vague Thai follow-ups, optional LiteLLM slow-path parser with assist-mode status UX, response formatter, Redis-backed cache/dedup/rate limit/context state, Telegram polling worker, LINE webhook adapter, optional Telegram webhook route behind env flags, Prometheus-style `/metrics`, Telegram ops alerts.
 - Implemented developer tooling: offline PyThaiNLP Thai query evaluation under `tools/thai-query-eval/` for reviewed/redacted no-match and unsupported examples. It is not part of the Docker app runtime.
 - Deploy services: `parts-lookup-api` and dedicated `parts-lookup-redis` in Docker Compose project/network/volume names prefixed with `parts-lookup`.
 - Implemented profile services: Business Profile file loader with backward-compatible v1 normalization into Domain Profile v2. `profiles/construction-demo.json` explicitly declares `inventory_item` actions/connectors for real SML construction-materials data at `192.168.2.248:3515`; `profiles/auto-parts-mock.json` is a non-production fixture proving the core can run another domain without source edits.
@@ -50,10 +50,10 @@ Last checked from this workstation and deploy server `192.168.2.109`:
 ## Known Gaps
 
 - Application code: pilot runtime exists under `src/`.
-- Testing: latest local run passed `106` Vitest tests and `npm run build`.
+- Testing: latest local run passed `116` Vitest tests and `npm run build`.
 - Server smoke: latest app deploy passed `GET /health`, unauthenticated internal endpoint rejection, authenticated `/metrics`, Redis readiness, and safe SML fallback; authenticated `/ready` is currently degraded because SML MCP is unavailable.
 - Telegram pilot bot username: `employee_assistant_248_bot`.
 - SML: least-privileged role, correct tenant/product dataset, timeout behavior, and search quality need verification.
 - Security: SML tool allowlist is read-only; LINE/Telegram/internal/tunnel secrets must stay in untracked `.env`; production internal endpoints require bearer auth.
 - Performance: cache TTLs, SML timeout budgets, Business Profile lookup, tenant/entity/action cache key cardinality, and exact/fuzzy lookup strategy need validation with real queries.
-- UX: no-match, paged multi-match, refine prompt when source has more results than the local buffer, invalid/expired numeric selection, numeric selection after multi-match, exact-code display name enrichment, timeout, profile-driven greeting/help/unsupported messages, small-talk/non-lookup guard, LiteLLM assist status/footer/friendly failure copy, duplicate update, private message, group mention/prefix, and group no-mention behavior are implemented/tested.
+- UX: no-match, paged multi-match, refine prompt when source has more results than the local buffer, invalid/expired numeric selection, numeric selection after multi-match, exact-code display name enrichment, timeout, profile-driven greeting/help/thanks/ack/out-of-scope messages, small-talk/non-lookup guard, no SML/LLM calls for out-of-scope external/general questions, LiteLLM assist status/footer/friendly failure copy, duplicate update, private message, group mention/prefix, and group no-mention behavior are implemented/tested.
