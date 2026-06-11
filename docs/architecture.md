@@ -117,7 +117,7 @@ Rules:
 - The lookup orchestrator only receives structured queries; it does not parse raw chat text directly.
 - In `shadow` mode, LLM parser output is logged/measured but does not change the user-facing reply.
 - In `assist` mode, LLM parser output may be used only when deterministic parsing is unsupported or a deterministic lookup returns no match, and local validation/confidence checks pass.
-- User-facing assist status/footer copy is configured in Business Profile reply style; it may reveal provider/model, but must still state that the source system is the truth.
+- User-facing assist status/footer copy is configured in Business Profile reply style; it may reveal provider/model, but must still state that the source system is the truth. Raw provider outcomes remain in logs/metrics, not normal user replies.
 - PyThaiNLP is a developer evaluation tool for lexical Thai segmentation and alias discovery; it must not become a source of lookup facts and must not run in the default request path.
 
 ## Failure Boundaries
@@ -127,10 +127,11 @@ Rules:
 | Invalid Telegram/LINE verification | Reject; do not process or reply. |
 | Duplicate event | Acknowledge/ignore; do not send duplicate reply. |
 | Group message without gate | Ignore silently. |
-| Parser cannot find intent | Reply with tenant-specific examples in private chat; ignore or concise help in group. |
-| LLM parser invalid/timeout | Treat as unsupported or no-match; if configured, show safe assist failure copy with provider/model/outcome but never raw prompt, raw provider payload, token, or source facts. |
+| Parser cannot find intent | Reply with profile-driven unsupported/help-lite copy; do not invent lookup facts. |
+| Friendly non-lookup text | Greeting, thanks, acknowledgement, help-style, sticker-only, or emoji-only messages return profile-driven friendly copy and do not call LLM/SML. |
+| LLM parser invalid/timeout | Treat as unsupported or no-match; if configured, show safe assist failure copy without raw provider outcomes, raw prompt, raw provider payload, token, or source facts. Keep true outcomes in logs/metrics. |
 | No entity found | Ask for clearer ID, model, descriptor, or keyword. |
-| Multiple entities found | Present top choices and ask the user to choose. |
+| Multiple entities found | Present current-page choices and ask the user to choose. If the local candidate buffer is exhausted while the source reports more matches, ask the user to refine the query. |
 | SML timeout/unavailable | Fail closed with safe fallback; never invent source facts. |
 | SML malformed response | Log schema error, return safe fallback. |
 | Redis unavailable | Continue with direct SML for low traffic if safe; disable cache-dependent follow-up context; alert. |

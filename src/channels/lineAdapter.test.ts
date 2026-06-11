@@ -200,6 +200,7 @@ describe("LineAdapter", () => {
       body: { chatId: "u1", loadingSeconds: 6 }
     });
     expect(calls[1]?.url).toBe("https://api.line.me/v2/bot/message/reply");
-    expect(JSON.stringify(calls[1]?.body)).toContain("ตีความไม่สำเร็จ");
+    expect(JSON.stringify(calls[1]?.body)).toContain("ยังตีความคำถามนี้ไม่สำเร็จ");
+    expect(JSON.stringify(calls[1]?.body)).not.toContain("rejected_timeout");
   });
 });

@@ -10,7 +10,7 @@ export function formatAssistStartingMessage(
   event: LlmAssistStartEvent,
   options: AssistFormatOptions = {}
 ): string {
-  return formatTemplate(profile.replyStyle.assistStartingMessage, placeholders(event, options));
+  return formatTemplate(profile.replyStyle.assistStartingMessage, placeholders(profile, event, options));
 }
 
 export function formatAssistSuccessFooter(
@@ -18,7 +18,7 @@ export function formatAssistSuccessFooter(
   assist: LlmAssistInfo,
   options: AssistFormatOptions = {}
 ): string {
-  return formatTemplate(profile.replyStyle.assistSuccessFooter, placeholders(assist, options));
+  return formatTemplate(profile.replyStyle.assistSuccessFooter, placeholders(profile, assist, options));
 }
 
 export function formatAssistFailureMessage(
@@ -26,10 +26,11 @@ export function formatAssistFailureMessage(
   assist: LlmAssistInfo,
   options: AssistFormatOptions = {}
 ): string {
-  return formatTemplate(profile.replyStyle.assistFailureMessage, placeholders(assist, options));
+  return formatTemplate(profile.replyStyle.assistFailureMessage, placeholders(profile, assist, options));
 }
 
 function placeholders(
+  profile: BusinessProfile,
   assist: LlmAssistInfo | LlmAssistStartEvent,
   options: AssistFormatOptions
 ): Record<string, string> {
@@ -38,6 +39,7 @@ function placeholders(
     model: options.showModel === false ? "ไม่แสดง" : assist.model,
     outcome: "outcome" in assist && assist.outcome ? assist.outcome : "started",
     provider: assist.provider,
+    sourceTruthFooter: profile.replyStyle.sourceTruthFooter,
     timeoutMs: String(assist.timeoutMs)
   };
 }

@@ -1,6 +1,7 @@
 import { formatBusinessProfileHelp, type BusinessProfile } from "../config/businessProfile.js";
 import { formatAssistFailureMessage, formatAssistSuccessFooter } from "./assistFormatting.js";
 import { entityDisplayId, entityDisplayLabel } from "./entityAdapter.js";
+import { nonLookupKindFromReason } from "./nonLookupGuard.js";
 import type { LookupIntent, LookupResult, PriceLine, ProductCandidate, StockLine } from "./types.js";
 
 const DEFAULT_PAGE_SIZE = 5;
@@ -47,15 +48,15 @@ export function formatLookupReply(
       });
       break;
     case "unsupported":
-      reply = profile ? formatBusinessProfileHelp(profile) : "ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ";
+      reply = formatUnsupportedReply(result.reason, profile);
       break;
     case "dependency_error":
       if (result.reason === "sml_timeout") {
-        reply = "ระบบ SML ตอบช้าเกินไป กรุณาลองใหม่อีกครั้ง";
+        reply = "ระบบต้นทางตอบช้าเกินไป กรุณาลองใหม่อีกครั้ง";
         break;
       }
       if (result.reason === "sml_circuit_open") {
-        reply = "ระบบ SML มีปัญหาชั่วคราว กรุณาลองใหม่อีกครั้ง";
+        reply = "ระบบต้นทางมีปัญหาชั่วคราว กรุณาลองใหม่อีกครั้ง";
         break;
       }
       reply = `ตอนนี้ดึงข้อมูล${profile?.replyStyle.entityLabel ?? ""}ไม่ได้ กรุณาลองใหม่อีกครั้ง`;
@@ -83,14 +84,18 @@ export function formatMultipleMatches(options: {
   const visible = options.candidates.slice(pageStart, pageStart + pageSize);
   const shownEnd = pageStart + visible.length;
   const totalFound = options.totalFound ?? options.candidates.length;
-  const hasMore = options.hasMore ?? (shownEnd < options.candidates.length || shownEnd < totalFound);
+  const bufferHasMore = shownEnd < options.candidates.length;
+  const sourceHasMore = shownEnd < totalFound || (options.hasMore === true && !bufferHasMore);
+  const hasMore = options.hasMore ?? (bufferHasMore || sourceHasMore);
   const rangeText =
     totalFound > visible.length || pageStart > 0
       ? ` (แสดง ${pageStart + 1}-${shownEnd}${totalFound ? ` จาก ${totalFound}` : ""})`
       : "";
-  const prompt = hasMore
+  const prompt = bufferHasMore
     ? options.profile?.replyStyle.moreResultsPrompt
-    : options.profile?.replyStyle.multiMatchPrompt;
+    : sourceHasMore
+      ? options.profile?.replyStyle.refineMoreResultsPrompt
+      : options.profile?.replyStyle.multiMatchPrompt;
 
   return [
     `เจอหลายรายการสำหรับ "${options.keyword}"${rangeText}`,
@@ -99,8 +104,24 @@ export function formatMultipleMatches(options: {
       const label = entityDisplayLabel(product.entity, product.name);
       return `${index + 1}. ${id} - ${label}`;
     }),
-    prompt ?? "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งรหัส/คำค้นที่เจาะจงขึ้น"
+    prompt ?? (hasMore ? "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งคำค้นให้เจาะจงขึ้น" : "ตอบเลข 1-5 เพื่อเลือกรายการ")
   ].join("\n");
+}
+
+function formatUnsupportedReply(reason: string, profile?: BusinessProfile): string {
+  if (!profile) return "ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ";
+
+  const friendlyKind = nonLookupKindFromReason(reason);
+  if (friendlyKind === "help_question") return formatBusinessProfileHelp(profile);
+  if (friendlyKind === "greeting" || friendlyKind === "thanks" || friendlyKind === "acknowledgement") {
+    return profile.replyStyle.greetingMessage;
+  }
+  if (friendlyKind === "empty" || friendlyKind === "emoji_only") return profile.replyStyle.unsupportedMessage;
+
+  const lines = [profile.replyStyle.unsupportedMessage, profile.replyStyle.lookupHintMessage].filter(
+    (line, index, all) => line && all.indexOf(line) === index
+  );
+  return lines.join("\n");
 }
 
 function formatSuccess(result: Extract<LookupResult, { status: "success" }>): string {

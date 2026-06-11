@@ -4,6 +4,7 @@ import {
   phrasesForLegacyIntent,
   type BusinessProfile
 } from "../config/businessProfile.js";
+import { classifyNonLookupText, type NonLookupKind } from "../core/nonLookupGuard.js";
 import { formatMultipleMatches } from "../core/responseFormatter.js";
 import type { EntityCandidate, LookupActionId, LookupIntent, LookupResult, ProductCandidate } from "../core/types.js";
 import type { CacheService } from "../services/cacheService.js";
@@ -37,6 +38,10 @@ export async function resolveTextWithContext(options: {
   if (isHelpText(normalized)) {
     return { kind: "reply", text: helpText(options.businessProfile) };
   }
+  const nonLookup = classifyNonLookupText(normalized);
+  if (nonLookup && !parseIntentFromText(normalized, options.businessProfile) && !parseExactCode(normalized)) {
+    return { kind: "reply", text: nonLookupReply(options.businessProfile, nonLookup) };
+  }
 
   const context = await options.contextStore?.get<ChatContext>(options.key);
   if (isMoreResultsText(normalized)) {
@@ -61,9 +66,10 @@ export async function resolveTextWithContext(options: {
     const pageSize = context.pageSize ?? 5;
     const visibleCount = Math.min(pageSize, Math.max(0, context.candidates.length - pageStart));
     if (numericSelection < 0 || numericSelection >= visibleCount) {
+      const keyword = context.keyword ? ` สำหรับ "${context.keyword}"` : "";
       return {
         kind: "reply",
-        text: `กรุณาเลือกเลข 1-${visibleCount || 1} หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
+        text: `กรุณาเลือกเลข 1-${visibleCount || 1}${keyword} หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
       };
     }
     const selected = context.candidates[pageStart + numericSelection];
@@ -225,9 +231,13 @@ async function resolveMoreResults(options: {
   const currentStart = options.context.candidatePageStart ?? 0;
   const nextStart = currentStart + pageSize;
   if (nextStart >= options.context.candidates.length) {
+    const totalFound = options.context.totalFound ?? options.context.candidates.length;
     return {
       kind: "reply",
-      text: options.businessProfile.replyStyle.noMoreResultsPrompt
+      text:
+        totalFound > options.context.candidates.length
+          ? options.businessProfile.replyStyle.refineMoreResultsPrompt
+          : options.businessProfile.replyStyle.noMoreResultsPrompt
     };
   }
 
@@ -242,7 +252,9 @@ async function resolveMoreResults(options: {
     kind: "reply",
     text: formatMultipleMatches({
       candidates: updatedContext.candidates ?? [],
-      hasMore: nextStart + pageSize < (updatedContext.candidates?.length ?? 0),
+      hasMore:
+        nextStart + pageSize < (updatedContext.candidates?.length ?? 0) ||
+        nextStart + pageSize < (updatedContext.totalFound ?? updatedContext.candidates?.length ?? 0),
       intent: updatedContext.intent ?? "stock_price",
       keyword: updatedContext.keyword ?? "รายการล่าสุด",
       pageSize,
@@ -358,4 +370,12 @@ function containsAny(normalizedInput: string, phrases: string[]): boolean {
 
 function normalizeText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function nonLookupReply(profile: BusinessProfile, kind: NonLookupKind): string {
+  if (kind === "help_question") return helpText(profile);
+  if (kind === "greeting" || kind === "thanks" || kind === "acknowledgement") {
+    return profile.replyStyle.greetingMessage;
+  }
+  return profile.replyStyle.unsupportedMessage;
 }

@@ -9,19 +9,24 @@ const phraseSchema = z.array(z.string().min(1)).default([]);
 
 const defaultReplyStyle = {
   assistFailureMessage:
-    "LiteLLM assist model {model} ตีความไม่สำเร็จ ({outcome}, {durationMs}ms) กรุณาส่งรหัส รายละเอียด หรือคำค้นให้ชัดขึ้น",
+    "ยังตีความคำถามนี้ไม่สำเร็จ กรุณาส่งรหัส ชื่อ รุ่น ยี่ห้อ หรือคำค้นให้ชัดขึ้น",
   assistStartingMessage:
     "กำลังใช้ LiteLLM assist model {model} ช่วยตีความคำถามนี้ครับ ช้าเร็วขึ้นอยู่กับ model ที่ใช้งาน...",
-  assistSuccessFooter: "Assist: LiteLLM {model} ช่วยตีความคำค้น; ข้อมูลจริงมาจากระบบต้นทาง",
+  assistSuccessFooter: "Assist: LiteLLM {model} ช่วยตีความคำค้น; {sourceTruthFooter}",
   entityIdLabel: "รหัส",
   entityLabel: "รายการ",
   fallbackProductHints: "ลองส่งรหัส รายละเอียด หรือคำค้นที่เฉพาะเจาะจงขึ้น",
+  greetingMessage: "สวัสดีครับ ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ",
   helpFooter: "ถ้าผมเจอหลายรายการ ให้ตอบเลข 1-5 เพื่อเลือก หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
   helpIntro: "ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ ผมจะช่วยเช็กข้อมูลจากระบบต้นทางให้",
+  lookupHintMessage: "ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ",
   moreResultsPrompt: "ตอบเลข 1-5 เพื่อเลือกรายการ หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",
   multiMatchPrompt: "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งรหัส/คำค้นที่เจาะจงขึ้น",
   noContextPrompt: "ยังไม่มีรายการล่าสุดให้เลือก กรุณาส่งรหัส รายละเอียด หรือค้นหารายการก่อน",
-  noMoreResultsPrompt: "แสดงรายการชุดนี้ครบแล้วครับ ถ้ายังไม่เจอ ลองส่งคำค้นให้เฉพาะเจาะจงขึ้น"
+  noMoreResultsPrompt: "แสดงรายการชุดนี้ครบแล้วครับ ถ้ายังไม่เจอ ลองส่งคำค้นให้เฉพาะเจาะจงขึ้น",
+  refineMoreResultsPrompt: "ยังมีรายการมากกว่านี้ กรุณาเพิ่มรุ่น ยี่ห้อ ขนาด หรือรหัสให้ชัดขึ้น",
+  sourceTruthFooter: "ข้อมูลจริงมาจากระบบต้นทาง",
+  unsupportedMessage: "ผมยังไม่แน่ใจว่าต้องการค้นหาอะไร กรุณาส่งรหัส ชื่อ รุ่น ยี่ห้อ หรือคำค้นให้ชัดขึ้น"
 };
 
 const domainEntitySchema = z.object({
@@ -106,12 +111,17 @@ export const businessProfileSchema = z
         entityIdLabel: z.string().default(defaultReplyStyle.entityIdLabel),
         entityLabel: z.string().default(defaultReplyStyle.entityLabel),
         fallbackProductHints: z.string().default(defaultReplyStyle.fallbackProductHints),
+        greetingMessage: z.string().default(defaultReplyStyle.greetingMessage),
         helpFooter: z.string().default(defaultReplyStyle.helpFooter),
         helpIntro: z.string().default(defaultReplyStyle.helpIntro),
+        lookupHintMessage: z.string().default(defaultReplyStyle.lookupHintMessage),
         moreResultsPrompt: z.string().default(defaultReplyStyle.moreResultsPrompt),
         multiMatchPrompt: z.string().default(defaultReplyStyle.multiMatchPrompt),
         noContextPrompt: z.string().default(defaultReplyStyle.noContextPrompt),
-        noMoreResultsPrompt: z.string().default(defaultReplyStyle.noMoreResultsPrompt)
+        noMoreResultsPrompt: z.string().default(defaultReplyStyle.noMoreResultsPrompt),
+        refineMoreResultsPrompt: z.string().default(defaultReplyStyle.refineMoreResultsPrompt),
+        sourceTruthFooter: z.string().default(defaultReplyStyle.sourceTruthFooter),
+        unsupportedMessage: z.string().default(defaultReplyStyle.unsupportedMessage)
       })
       .default(defaultReplyStyle),
     sml: z
@@ -134,12 +144,49 @@ export const businessProfileSchema = z
         });
       }
     }
+    if (profile.domain) {
+      if (profile.domain.entities.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Domain profile must declare at least one entity type",
+          path: ["domain", "entities"]
+        });
+      }
+      if (profile.domain.actions.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Domain profile must declare at least one action",
+          path: ["domain", "actions"]
+        });
+      }
+      if (profile.domain.connectors.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Domain profile must declare at least one read-only connector",
+          path: ["domain", "connectors"]
+        });
+      }
+    }
     for (const [connectorIndex, connector] of profile.domain?.connectors.entries() ?? []) {
       if (!connector.readOnly) {
         ctx.addIssue({
           code: "custom",
           message: "Connector write policy is not allowed for this read-only lookup service",
           path: ["domain", "connectors", connectorIndex, "readOnly"]
+        });
+      }
+      if (connector.allowedTools.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Read-only connector must declare allowed tools",
+          path: ["domain", "connectors", connectorIndex, "allowedTools"]
+        });
+      }
+      if (Object.keys(connector.actionToolMap).length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Read-only connector must map at least one domain action to a tool",
+          path: ["domain", "connectors", connectorIndex, "actionToolMap"]
         });
       }
       for (const [toolIndex, tool] of connector.allowedTools.entries()) {
@@ -182,7 +229,7 @@ export function formatBusinessProfileHelp(profile: BusinessProfile): string {
   const examples = profile.helpExamples.length > 0 ? profile.helpExamples : profile.examples.map((item) => item.text);
   return [
     profile.replyStyle.helpIntro,
-    ...examples.slice(0, 5).map((example) => `- ${example}`),
+    ...examples.slice(0, 3).map((example) => `- ${example}`),
     profile.replyStyle.helpFooter
   ].join("\n");
 }

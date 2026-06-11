@@ -30,16 +30,19 @@ describe("understandLookupQuery", () => {
   });
 
   it("uses LLM in assist mode only when deterministic parser is unsupported", async () => {
+    let calls = 0;
     const parser: LookupLlmParser = {
       metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
-      parse: async () => ({
-        aliases: ["ปูน ช้าง"],
-        confidence: 0.98,
-        intent: "stock",
-        keyword: "ปูนตราช้าง",
-        searchTerms: ["ปูนตราช้าง", "ปูน ช้าง"],
-        status: "parsed"
-      })
+      parse: async () => {
+        calls += 1;
+        return {
+          confidence: 0.98,
+          intent: "stock",
+          keyword: "ปูนตราช้าง",
+          searchTerms: ["ปูนตราช้าง", "ปูน ช้าง"],
+          status: "parsed"
+        };
+      }
     };
 
     await expect(
@@ -53,6 +56,29 @@ describe("understandLookupQuery", () => {
       keyword: "ปูนตราช้าง",
       searchTerms: ["ปูนตราช้าง", "ปูน ช้าง"]
     });
+    expect(calls).toBe(1);
+  });
+
+  it("does not call LLM assist for friendly non-lookup text", async () => {
+    let calls = 0;
+    const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        calls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+
+    await expect(
+      understandLookupQuery("สวัสดีครับ", profile, {
+        llmParser: parser,
+        llmParserMode: "assist"
+      })
+    ).resolves.toMatchObject({
+      status: "unsupported",
+      reason: "friendly_greeting"
+    });
+    expect(calls).toBe(0);
   });
 
   it("falls back to unsupported when LLM is rejected", async () => {

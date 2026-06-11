@@ -3,6 +3,7 @@ import type { BusinessProfile } from "../config/businessProfile.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
 import type { LlmParseResult, LlmParserMode, LookupLlmParser } from "./llmParser.js";
 import { llmParseOutcome, runLlmParseWithTelemetry } from "./llmParser.js";
+import { classifyNonLookupText, friendlyUnsupportedReason } from "./nonLookupGuard.js";
 import { parseLookupQuery } from "./queryParser.js";
 import type { LlmAssistInfo, LlmAssistReason, LlmAssistStartEvent, ParseOutcome } from "./types.js";
 
@@ -23,6 +24,8 @@ export async function understandLookupQuery(
 ): Promise<ParseOutcome> {
   const deterministic = parseLookupQuery(text, profile);
   if (deterministic.status === "parsed") return deterministic;
+  const nonLookup = classifyNonLookupText(text);
+  if (nonLookup) return { status: "unsupported", reason: friendlyUnsupportedReason(nonLookup) };
   if (options.llmParserMode !== "assist" || !options.llmParser) return deterministic;
 
   const assistStart = startAssist(options.llmParser, "unsupported", options);

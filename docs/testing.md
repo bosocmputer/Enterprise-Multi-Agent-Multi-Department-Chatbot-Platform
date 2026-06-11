@@ -16,8 +16,8 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 | Area | Required cases |
 | --- | --- |
-| Business Profile | schema validation, missing profile, disabled intent, Domain Profile v2 normalization, read-only connector allowlist, tenant examples, alias expansion, invalid profile rollback behavior. |
-| Query parser/understanding | tenant action/entity/query extraction, stock, price, stock+price, search-only, unsupported text, Thai/English variants from Business Profile, entity ID, barcode-like input, context-only follow-up. |
+| Business Profile | schema validation, missing profile, disabled intent, Domain Profile v2 normalization, required entity/action/read-only connector mapping, read-only connector allowlist, tenant examples, alias expansion, invalid profile rollback behavior. |
+| Query parser/understanding | tenant action/entity/query extraction, stock, price, stock+price, search-only, unsupported text, friendly non-lookup guard, Thai/English variants from Business Profile, entity ID, barcode-like input, context-only follow-up. |
 | LLM slow-path parser | LiteLLM request shape, generic JSON parser output, malformed JSON, wrong enum/action, empty query/searchTerms, low confidence, timeout, truncated completion, shadow mode no user-facing change, assist status/footer/failure copy. |
 | Thai query evaluation | PyThaiNLP tokenization fixture, custom dictionary from Business Profile aliases/examples, sensitive-key rejection, context-required phrase suggestions. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
@@ -29,7 +29,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 Latest local run on 2026-06-11:
 
-- `npm test`: 17 files, 91 tests passed.
+- `npm test`: 18 files, 106 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -70,6 +70,9 @@ Current covered cases:
 - Context guard replies with clarification for vague references such as `ตัวนี้ราคาเท่าไหร่` when no product context exists.
 - Context guard resolves `ตัวนี้ราคาเท่าไหร่` against the last product when safe.
 - Selection constraints such as `เอาแบบถูกสุดมีไหม` do not trigger SML search without enough context.
+- Greeting/thanks/help-style messages return profile-driven friendly copy and do not call LLM/SML.
+- Assist failure messages do not expose raw provider outcomes such as `provider_error` or `rejected_timeout` to users.
+- Multi-match replies ask the user to refine when the source reports more results than the local candidate buffer can page through.
 - Known bare Business Profile terms such as `ปูนตราช้าง` become search lookups instead of generic help.
 - Domain Profile v2 drives action/entity metadata and command aliases without source edits.
 - Mock auto-parts profile uses the same lookup core with a mocked connector client, proving the core is not bound to construction-materials data.

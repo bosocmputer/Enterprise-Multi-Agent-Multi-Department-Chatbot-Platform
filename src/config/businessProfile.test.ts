@@ -19,9 +19,12 @@ describe("business profile", () => {
         tenantStatus: "real"
       }
     });
-    expect(formatBusinessProfileHelp(profile)).toContain("มีปูนเหลือไหม");
+    const helpText = formatBusinessProfileHelp(profile);
+    expect(helpText).toContain("ปูน ราคา");
     expect(formatBusinessProfileHelp(profile)).toContain("ส่งชื่อสินค้า");
+    expect(formatBusinessProfileHelp(profile)).not.toContain("SML");
     expect(formatBusinessProfileHelp(profile)).not.toContain("ตอนนี้รองรับ");
+    expect(helpText.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(3);
     expect(domain).toMatchObject({
       defaultEntityType: "inventory_item",
       connectors: [
@@ -64,19 +67,52 @@ describe("business profile", () => {
       businessType: "test",
       domain: {
         version: 2,
+        actions: [{ id: "search", legacyIntent: "search_product", phrases: ["find"] }],
         connectors: [
           {
+            actionToolMap: { search: "search_product" },
             allowedTools: ["search_product", "create_sale_reserve"],
             id: "bad",
             readOnly: true,
             source: "sml"
           }
-        ]
+        ],
+        entities: [{ label: "Entry", type: "entry" }]
       },
       tenantId: "test"
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it("rejects incomplete domain profile v2 config", () => {
+    const parsed = businessProfileSchema.safeParse({
+      businessType: "test",
+      domain: {
+        version: 2,
+        actions: [],
+        connectors: [
+          {
+            id: "empty",
+            readOnly: true,
+            source: "source"
+          }
+        ],
+        entities: []
+      },
+      tenantId: "test"
+    });
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const messages = parsed.error.issues.map((issue) => issue.message);
+      expect(messages).toEqual(expect.arrayContaining([
+        "Domain profile must declare at least one entity type",
+        "Domain profile must declare at least one action",
+        "Read-only connector must declare allowed tools",
+        "Read-only connector must map at least one domain action to a tool"
+      ]));
+    }
   });
 
   it("normalizes v1-only profiles into domain profile v2", () => {

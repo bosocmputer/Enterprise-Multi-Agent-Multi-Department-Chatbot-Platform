@@ -109,7 +109,16 @@ describe("parseLookupQuery", () => {
             commandAliases: ["avail"]
           }
         ],
-        connectors: []
+        connectors: [
+          {
+            actionToolMap: { availability: "get_stock_balance" },
+            allowedTools: ["get_stock_balance"],
+            entityTypes: ["catalog_entry"],
+            id: "readonly",
+            readOnly: true,
+            source: "test"
+          }
+        ]
       },
       enabledIntents: ["stock"],
       intentPhrases: {

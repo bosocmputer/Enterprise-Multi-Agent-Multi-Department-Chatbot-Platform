@@ -313,8 +313,8 @@ describe("TelegramPollingWorker", () => {
     expect(actions).toEqual([{ action: "typing", chat_id: "100" }]);
     expect(sentMessages).toHaveLength(2);
     expect(sentMessages[0]?.text).toContain("กำลังใช้ LiteLLM assist model openrouter/openrouter/free");
-    expect(sentMessages[1]?.text).toContain("ตีความไม่สำเร็จ");
-    expect(sentMessages[1]?.text).toContain("rejected_timeout");
+    expect(sentMessages[1]?.text).toContain("ยังตีความคำถามนี้ไม่สำเร็จ");
+    expect(sentMessages[1]?.text).not.toContain("rejected_timeout");
   });
 
   it("does not send assist status for clear fast-path queries", async () => {

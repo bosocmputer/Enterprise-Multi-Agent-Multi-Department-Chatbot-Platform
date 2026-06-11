@@ -55,10 +55,10 @@ describe("response formatter", () => {
     );
 
     expect(reply).toContain("Assist: LiteLLM openrouter/openrouter/free");
-    expect(reply).toContain("ข้อมูลสินค้า/ราคา/สต็อกมาจาก SML");
+    expect(reply).toContain("ข้อมูลสินค้า/ราคา/สต็อกมาจากระบบต้นทาง");
   });
 
-  it("uses assist failure copy when assist is rejected", () => {
+  it("uses friendly assist failure copy when assist is rejected", () => {
     const reply = formatLookupReply(
       {
         intent: "stock",
@@ -77,8 +77,60 @@ describe("response formatter", () => {
       profile
     );
 
-    expect(reply).toContain("LiteLLM assist model openrouter/openrouter/free");
-    expect(reply).toContain("rejected_timeout");
-    expect(reply).toContain("6001ms");
+    expect(reply).toContain("ยังตีความคำถามนี้ไม่สำเร็จ");
+    expect(reply).not.toContain("rejected_timeout");
+    expect(reply).not.toContain("6001ms");
+    expect(reply).not.toContain("provider_error");
+  });
+
+  it("formats friendly unsupported replies without showing the full help every time", () => {
+    const reply = formatLookupReply(
+      {
+        reason: "friendly_greeting",
+        status: "unsupported"
+      },
+      profile
+    );
+
+    expect(reply).toContain("ส่งชื่อสินค้า");
+    expect(reply.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(0);
+  });
+
+  it("uses generic source-system wording for dependency failures", () => {
+    const reply = formatLookupReply(
+      {
+        reason: "sml_timeout",
+        status: "dependency_error"
+      },
+      profile
+    );
+
+    expect(reply).toContain("ระบบต้นทาง");
+    expect(reply).not.toContain("ระบบ SML");
+  });
+
+  it("asks users to refine when source has more results than the local candidate buffer", () => {
+    const candidates = Array.from({ length: 20 }, (_, index) => ({
+      code: `A${String(index + 1).padStart(3, "0")}`,
+      name: `สินค้า ${index + 1}`
+    }));
+
+    const reply = formatLookupReply(
+      {
+        candidates,
+        hasMore: true,
+        intent: "price",
+        keyword: "สินค้า",
+        pageSize: 5,
+        pageStart: 15,
+        status: "multiple_matches",
+        totalFound: 58
+      },
+      profile
+    );
+
+    expect(reply).toContain("แสดง 16-20 จาก 58");
+    expect(reply).toContain("ยังมีรายการมากกว่านี้");
+    expect(reply).not.toContain("พิมพ์ \"เพิ่ม\"");
   });
 });

@@ -6,6 +6,31 @@ import { resolveTextWithContext, saveLookupContext, type ChatContext } from "./c
 const profile = loadBusinessProfile("profiles/construction-demo.json");
 
 describe("chat context helpers", () => {
+  it("answers friendly greetings without sending them to lookup", async () => {
+    await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "สวัสดีครับ" })).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("ส่งชื่อสินค้า")
+    });
+  });
+
+  it("answers thanks without sending them to lookup", async () => {
+    await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "ขอบคุณ" })).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("ส่งชื่อสินค้า")
+    });
+  });
+
+  it("answers usage questions with profile-driven help", async () => {
+    const resolved = await resolveTextWithContext({ businessProfile: profile, key: "k", text: "ช่วยใช้งานยังไง" });
+
+    expect(resolved).toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("ส่งชื่อสินค้า")
+    });
+    expect(resolved.text).not.toContain("SML");
+    expect(resolved.text.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(3);
+  });
+
   it("asks users to search again when numeric selection context expired", async () => {
     await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "1" })).resolves.toMatchObject({
       kind: "reply",
@@ -32,7 +57,7 @@ describe("chat context helpers", () => {
 
     await expect(resolveTextWithContext({ businessProfile: profile, contextStore: store, key: "k", text: "3" })).resolves.toMatchObject({
       kind: "reply",
-      text: expect.stringContaining("1-2")
+      text: expect.stringContaining("1-2 สำหรับ \"สินค้า\"")
     });
   });
 
@@ -142,6 +167,42 @@ describe("chat context helpers", () => {
     await expect(resolveTextWithContext({ businessProfile: profile, key: "k", text: "เพิ่ม" })).resolves.toMatchObject({
       kind: "reply",
       text: expect.stringContaining("ยังไม่มีรายการล่าสุด")
+    });
+  });
+
+  it("asks users to refine when buffered candidates are exhausted but source has more", async () => {
+    const store = new MemoryCacheService();
+    const candidates = Array.from({ length: 10 }, (_, index) => ({
+      code: `A${String(index + 1).padStart(3, "0")}`,
+      name: `สินค้า ${index + 1}`
+    }));
+    await saveLookupContext({
+      contextStore: store,
+      key: "k",
+      result: {
+        candidates,
+        hasMore: true,
+        intent: "price",
+        keyword: "สินค้า",
+        pageSize: 5,
+        pageStart: 5,
+        status: "multiple_matches",
+        totalFound: 25
+      },
+      ttlSeconds: 300
+    });
+
+    await expect(
+      resolveTextWithContext({
+        businessProfile: profile,
+        contextStore: store,
+        contextTtlSeconds: 300,
+        key: "k",
+        text: "เพิ่ม"
+      })
+    ).resolves.toMatchObject({
+      kind: "reply",
+      text: expect.stringContaining("ยังมีรายการมากกว่านี้")
     });
   });
 
