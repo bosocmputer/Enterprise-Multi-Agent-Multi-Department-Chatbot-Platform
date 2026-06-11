@@ -69,11 +69,19 @@ Domain Profile v2 defines actions first. Legacy inventory intents are compatibil
 | `price` | `price` | entity ID or query | `search_product`, `get_product_price` |
 | `availability_price` | `stock_price` | entity ID or query | `search_product`, `get_stock_balance`, `get_product_price` |
 
+## Capability Gaps
+
+Business Profile can declare `capabilities.supported` and `capabilities.requestable`.
+Supported capabilities map to read-only connector tools. Requestable capabilities describe useful data the bot cannot currently fetch, such as cost, supplier, reserved stock, lot/serial, lead time, or customer-specific price.
+
+When a requestable capability is detected, the bot returns `capability_gap` and does not call SML. The user-facing reply asks staff to notify the source-system/SML team to add a read-only MCP for that capability. LLM output may select only a declared capability id; it must not invent tool names or source facts.
+
 ## Business Profile Requirements
 
 Every production tenant should define:
 
 - Domain Profile v2 entities and actions
+- supported and requestable capabilities for missing-MCP handling
 - connector mapping from actions to read-only tools/APIs
 - enabled legacy intents for the current inventory adapter, until fully removed
 - user-facing help examples

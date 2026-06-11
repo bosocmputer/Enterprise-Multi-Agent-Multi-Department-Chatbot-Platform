@@ -49,6 +49,13 @@ Before production answers, confirm with SML/business users:
 | `get_stock_balance` | Read stock balance for a product. | `code` |
 | `get_product_price` | Read price for a product. | `code` |
 
+Capability gaps:
+
+- If staff asks for data outside these allowed tools, such as cost, supplier, reserved stock, lot/serial, lead time, promotion, sales history, or customer-specific price, the bot returns `capability_gap`.
+- `capability_gap` replies ask staff to notify the SML/source-system team to add a read-only MCP for that capability.
+- Do not use `capability_gap` for normal no-match, broad search, malformed SML response, timeout, or circuit-open errors.
+- Suggested MCP names must come from Business Profile `capabilities.requestable`; LLM output must not invent tool names.
+
 Blocked tools:
 
 - `create_sale_reserve`

@@ -9,6 +9,7 @@ const DEFAULT_PAGE_SIZE = 5;
 export interface LookupReplyFormatOptions {
   assistResultFooterEnabled?: boolean;
   assistShowModel?: boolean;
+  capabilityGapShowTechnicalHint?: boolean;
 }
 
 export function formatLookupReply(
@@ -31,6 +32,11 @@ export function formatLookupReply(
         profile?.replyStyle.fallbackProductHints ?? "ลองส่งรหัส รายละเอียด หรือคำค้นที่เฉพาะเจาะจงขึ้น"
       ].join("\n");
       break;
+    case "needs_refinement":
+      reply =
+        profile?.replyStyle.refineAmbiguousResultsMessage ??
+        `ผลค้นหาสำหรับ "${result.keyword}" กว้างเกินไป กรุณาส่งคำค้นให้เฉพาะเจาะจงขึ้น`;
+      break;
     case "multiple_matches":
       if (result.candidates.length === 0) {
         reply = `ไม่พบตัวเลือก${profile?.replyStyle.entityLabel ?? "รายการ"}ที่ชัดเจนจาก "${result.keyword}"`;
@@ -50,6 +56,9 @@ export function formatLookupReply(
     case "unsupported":
       reply = formatUnsupportedReply(result.reason, profile);
       break;
+    case "capability_gap":
+      reply = formatCapabilityGapReply(result, profile, options);
+      break;
     case "dependency_error":
       if (result.reason === "sml_timeout") {
         reply = "ระบบต้นทางตอบช้าเกินไป กรุณาลองใหม่อีกครั้ง";
@@ -63,7 +72,12 @@ export function formatLookupReply(
       break;
   }
 
-  if (profile && options.assistResultFooterEnabled !== false && result.assist?.status === "parsed") {
+  if (
+    profile &&
+    result.status !== "capability_gap" &&
+    options.assistResultFooterEnabled !== false &&
+    result.assist?.status === "parsed"
+  ) {
     return [reply, "", formatAssistSuccessFooter(profile, result.assist, { showModel: options.assistShowModel })].join("\n");
   }
   return reply;
@@ -113,6 +127,8 @@ function formatUnsupportedReply(reason: string, profile?: BusinessProfile): stri
 
   const friendlyKind = nonLookupKindFromReason(reason);
   if (friendlyKind === "help_question") return formatBusinessProfileHelp(profile);
+  if (friendlyKind === "lookup_coaching") return profile.replyStyle.lookupCoachingMessage;
+  if (friendlyKind === "recommendation_guidance") return profile.replyStyle.recommendationGuidanceMessage;
   if (friendlyKind === "greeting") return profile.replyStyle.greetingMessage;
   if (friendlyKind === "thanks") return profile.replyStyle.thanksMessage;
   if (friendlyKind === "acknowledgement") return profile.replyStyle.acknowledgementMessage;
@@ -123,6 +139,34 @@ function formatUnsupportedReply(reason: string, profile?: BusinessProfile): stri
   const lines = [profile.replyStyle.unsupportedMessage, profile.replyStyle.lookupHintMessage].filter(
     (line, index, all) => line && all.indexOf(line) === index
   );
+  return lines.join("\n");
+}
+
+function formatCapabilityGapReply(
+  result: Extract<LookupResult, { status: "capability_gap" }>,
+  profile: BusinessProfile | undefined,
+  options: LookupReplyFormatOptions
+): string {
+  const messageTemplate =
+    profile?.replyStyle.capabilityGapMessage ??
+    "ข้อมูลนี้ยังไม่ได้เปิดให้บอทดึงจากระบบต้นทางครับ กรุณาแจ้งผู้ดูแลระบบต้นทางเพิ่ม read-only MCP สำหรับ {capabilityLabel} เพื่อให้ดึงข้อมูลนี้ได้ถูกต้อง";
+  const lines = [
+    formatTemplate(messageTemplate, {
+      capabilityId: result.capabilityId,
+      capabilityLabel: result.capabilityLabel,
+      suggestedReadOnlyTool: result.suggestedReadOnlyTool
+    })
+  ];
+  if (options.capabilityGapShowTechnicalHint && result.suggestedReadOnlyTool) {
+    const hintTemplate = profile?.replyStyle.capabilityGapTechnicalHint ?? "MCP ที่แนะนำ: {suggestedReadOnlyTool}";
+    lines.push(
+      formatTemplate(hintTemplate, {
+        capabilityId: result.capabilityId,
+        capabilityLabel: result.capabilityLabel,
+        suggestedReadOnlyTool: result.suggestedReadOnlyTool
+      })
+    );
+  }
   return lines.join("\n");
 }
 
@@ -145,6 +189,13 @@ function formatSuccess(result: Extract<LookupResult, { status: "success" }>): st
   const demoLabel = result.tenantStatus === "demo" ? " (demo data)" : "";
   lines.push("", `แหล่งข้อมูล: ${result.datasetLabel}${demoLabel}${result.cacheHit ? " (cache)" : ""}`);
   return lines.join("\n");
+}
+
+function formatTemplate(template: string, values: Record<string, string | undefined>): string {
+  return Object.entries(values).reduce(
+    (current, [key, value]) => current.replaceAll(`{${key}}`, value ?? ""),
+    template
+  );
 }
 
 function formatStock(stock: StockLine[]): string[] {

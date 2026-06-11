@@ -277,6 +277,165 @@ describe("LookupOrchestrator", () => {
     expect(llmCalls).toBe(0);
   });
 
+  it("returns capability gap without calling SML or LLM when a requestable capability matches the profile", async () => {
+    let smlCalls = 0;
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "parts-lookup-parser-auto-2", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        llmCalls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => {
+          smlCalls += 1;
+          return [];
+        },
+        getProductPrice: async () => {
+          smlCalls += 1;
+          return [];
+        }
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "PAINT-01424 ราคาทุนเท่าไหร่" })).resolves.toMatchObject({
+      capabilityId: "purchase_cost",
+      entityType: "inventory_item",
+      parserPath: "deterministic",
+      source: "none",
+      status: "capability_gap",
+      tenantId: "construction-demo"
+    });
+    expect(smlCalls).toBe(0);
+    expect(llmCalls).toBe(0);
+  });
+
+  it("answers lookup coaching without calling SML or LLM", async () => {
+    let smlCalls = 0;
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "parts-lookup-parser-auto-2", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        llmCalls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => {
+          smlCalls += 1;
+          return [];
+        }
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(
+      lookup.lookup({ text: "ถ้าหา PAINT-01424 ไม่เจอ ช่วยแนะนำว่าควรค้นด้วยคำไหนต่อ" })
+    ).resolves.toMatchObject({
+      conversationScope: "coaching",
+      parserPath: "none",
+      replyPolicy: "coaching",
+      status: "unsupported"
+    });
+    expect(smlCalls).toBe(0);
+    expect(llmCalls).toBe(0);
+  });
+
+  it("answers recommendation guidance without calling SML or LLM", async () => {
+    let smlCalls = 0;
+    let llmCalls = 0;
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "parts-lookup-parser-auto-2", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        llmCalls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => {
+          smlCalls += 1;
+          return [];
+        }
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "มีตัวไหนใกล้เคียงกับปูนตราช้างแต่ราคาถูกกว่าบ้าง" })).resolves.toMatchObject({
+      conversationScope: "coaching",
+      parserPath: "none",
+      replyPolicy: "coaching",
+      status: "unsupported"
+    });
+    expect(smlCalls).toBe(0);
+    expect(llmCalls).toBe(0);
+  });
+
+  it("asks for refinement when LLM assist search terms return broad weak matches", async () => {
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "parts-lookup-parser-auto-2", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => ({
+        confidence: 0.96,
+        intent: "price",
+        keyword: "Beger น้ำมันสน High-Gloss",
+        searchTerms: ["Beger High-Gloss"],
+        status: "parsed"
+      })
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => [
+          { code: "A001", name: "Beger ปูนกาว High-Gloss" },
+          { code: "A002", name: "Beger เหล็ก High-Gloss" }
+        ]
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "หา Beger น้ำมันสนที่เป็น High-Gloss แล้วดูราคาด้วย" })).resolves.toMatchObject({
+      assist: { status: "parsed" },
+      resultQuality: "needs_refinement",
+      status: "needs_refinement"
+    });
+  });
+
+  it("keeps strong result-quality matches after LLM assist", async () => {
+    const llmParser: LookupLlmParser = {
+      metadata: { model: "parts-lookup-parser-auto-2", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => ({
+        confidence: 0.96,
+        intent: "price",
+        keyword: "Beger น้ำมันสน High-Gloss",
+        searchTerms: ["Beger High-Gloss"],
+        status: "parsed"
+      })
+    };
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => [
+          { code: "A001", name: "Beger น้ำมันสน High-Gloss" },
+          { code: "A002", name: "Beger ปูนกาว High-Gloss" }
+        ],
+        getProductPrice: async () => [{ price: 199, unitName: "ชิ้น" }]
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test", llmParser, llmParserMode: "assist" }
+    );
+
+    await expect(lookup.lookup({ text: "หา Beger น้ำมันสนที่เป็น High-Gloss แล้วดูราคาด้วย" })).resolves.toMatchObject({
+      product: { code: "A001" },
+      status: "success"
+    });
+  });
+
   it("retries deterministic no-match once with LLM assist search terms", async () => {
     const requestedTerms: string[] = [];
     let llmCalls = 0;

@@ -53,7 +53,10 @@ export async function resolveTextWithContext(options: {
   const nonLookup = classifyNonLookupText(normalized);
   if (
     nonLookup &&
-    (isOutOfScopeKind(nonLookup) || (!parseIntentFromText(normalized, options.businessProfile) && !parseExactCode(normalized)))
+    (isOutOfScopeKind(nonLookup) ||
+      nonLookup === "lookup_coaching" ||
+      nonLookup === "recommendation_guidance" ||
+      (!parseIntentFromText(normalized, options.businessProfile) && !parseExactCode(normalized)))
   ) {
     return reply(nonLookupReply(options.businessProfile, nonLookup), metadataForNonLookupKind(nonLookup));
   }
@@ -398,6 +401,8 @@ function normalizeText(value: string): string {
 
 function nonLookupReply(profile: BusinessProfile, kind: NonLookupKind): string {
   if (kind === "help_question") return helpText(profile);
+  if (kind === "lookup_coaching") return profile.replyStyle.lookupCoachingMessage;
+  if (kind === "recommendation_guidance") return profile.replyStyle.recommendationGuidanceMessage;
   if (kind === "greeting") return profile.replyStyle.greetingMessage;
   if (kind === "thanks") return profile.replyStyle.thanksMessage;
   if (kind === "acknowledgement") return profile.replyStyle.acknowledgementMessage;

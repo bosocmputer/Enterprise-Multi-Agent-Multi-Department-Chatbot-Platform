@@ -534,4 +534,81 @@ describe("TelegramPollingWorker", () => {
     expect(sentMessages[0]?.text).not.toContain("กำลังใช้ LiteLLM assist");
     expect(sentMessages[0]?.text).toContain("Assist: LiteLLM openrouter/openrouter/free");
   });
+
+  it("handles bounded batch messages without saving ambiguous selection context", async () => {
+    const state = new MemoryCacheService();
+    const sentMessages: Array<{ text: string }> = [];
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async (keyword: string) => {
+          if (keyword === "PAINT-01424") return [{ code: "PAINT-01424", name: "Beger น้ำมันสน" }];
+          if (keyword === "A001") return [{ code: "A001", name: "น้ำมันสินค้า A" }];
+          return [
+            { code: "A001", name: "น้ำมันสินค้า A" },
+            { code: "A002", name: "น้ำมันสินค้า B" }
+          ];
+        },
+        getProductPrice: async () => [{ price: 88, unitName: "ชิ้น" }]
+      } as unknown as SmlClient,
+      state,
+      { businessProfile: profile, datasetLabel: "test" }
+    );
+
+    const updates = [
+      {
+        update_id: 400,
+        message: {
+          message_id: 500,
+          text: "PAINT-01424 ราคา\nน้ำมัน ราคา",
+          chat: { id: 100, type: "private" },
+          from: { id: 1, is_bot: false }
+        }
+      },
+      {
+        update_id: 401,
+        message: {
+          message_id: 501,
+          text: "1",
+          chat: { id: 100, type: "private" },
+          from: { id: 1, is_bot: false }
+        }
+      }
+    ];
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes("/getUpdates")) {
+        return new Response(JSON.stringify({ ok: true, result: updates.splice(0, 1) }));
+      }
+      if (url.includes("/sendMessage")) {
+        sentMessages.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ ok: true, result: {} }));
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const adapter = new TelegramAdapter({
+      batchLookupEnabled: true,
+      botToken: "test-token",
+      businessProfile: profile,
+      contextStore: state,
+      dedupStore: state,
+      fetchImpl,
+      maxBatchItems: 5,
+      maxBatchTextChars: 1200,
+      rateLimiter: state
+    });
+    const worker = new TelegramPollingWorker(adapter, lookup, {
+      intervalMs: 1,
+      timeoutSeconds: 0,
+      logger: createLogger({ LOG_LEVEL: "silent" })
+    });
+
+    await expect(worker.pollOnce()).resolves.toEqual({ received: 1, handled: 1, ignored: 0 });
+    await expect(worker.pollOnce()).resolves.toEqual({ received: 1, handled: 1, ignored: 0 });
+    expect(sentMessages[0]?.text).toContain("[1/2]");
+    expect(sentMessages[1]?.text).toContain("[2/2]");
+    expect(sentMessages[1]?.text).toContain("เจอหลายรายการ");
+    expect(sentMessages[2]?.text).toContain(profile.replyStyle.noContextPrompt);
+  });
 });

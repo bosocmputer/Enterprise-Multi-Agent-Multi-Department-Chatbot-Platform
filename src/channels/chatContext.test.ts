@@ -270,6 +270,22 @@ describe("chat context helpers", () => {
     });
   });
 
+  it("answers recommendation-style guidance without treating it as latest-list context", async () => {
+    await expect(
+      resolveTextWithContext({
+        businessProfile: profile,
+        key: "k",
+        text: "มีตัวไหนใกล้เคียงกับปูนตราช้างแต่ราคาถูกกว่าบ้าง"
+      })
+    ).resolves.toMatchObject({
+      conversationScope: "coaching",
+      kind: "reply",
+      parserPath: "none",
+      replyPolicy: "coaching",
+      text: profile.replyStyle.recommendationGuidanceMessage
+    });
+  });
+
   it("asks users to choose when selection constraints refer to recent candidates", async () => {
     const store = new MemoryCacheService();
     await saveLookupContext({

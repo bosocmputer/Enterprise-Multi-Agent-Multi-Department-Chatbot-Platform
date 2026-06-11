@@ -85,4 +85,30 @@ describe("MetricsRegistry", () => {
     expect(rendered).toContain('reply_policy="refuse_redirect"');
     expect(rendered).toContain('source="none"');
   });
+
+  it("records capability gap counters separately from lookup outcomes", () => {
+    const metrics = new MetricsRegistry();
+
+    metrics.recordLookup(
+      "telegram",
+      {
+        capabilityId: "purchase_cost",
+        capabilityLabel: "ราคาทุน/ต้นทุน",
+        entityType: "inventory_item",
+        parserPath: "deterministic",
+        replyPolicy: "lookup",
+        source: "none",
+        status: "capability_gap",
+        tenantId: "construction-demo"
+      },
+      3
+    );
+
+    const rendered = metrics.renderPrometheus();
+    expect(rendered).toContain("parts_lookup_capability_gap_total");
+    expect(rendered).toContain('capability="purchase_cost"');
+    expect(rendered).toContain('entity_type="inventory_item"');
+    expect(rendered).toContain('status="capability_gap"');
+    expect(rendered).toContain('source="none"');
+  });
 });

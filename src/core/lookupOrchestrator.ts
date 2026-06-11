@@ -11,6 +11,7 @@ import type { CacheService, DedupStore } from "../services/cacheService.js";
 import type { LlmParserMode, LookupLlmParser } from "./llmParser.js";
 import { runLlmParseWithTelemetry } from "./llmParser.js";
 import { assistInfo, startAssist, understandLookupQuery } from "./queryUnderstanding.js";
+import { evaluateResultQuality, type ResultQualityEvaluation, type ResultQualityMode } from "./resultQuality.js";
 import { attachEntities, attachEntity, entitiesFromProducts } from "./entityAdapter.js";
 import type {
   ConversationMetadata,
@@ -31,6 +32,7 @@ type ParsedLookup = Extract<ParseOutcome, { status: "parsed" }>;
 
 interface CandidateSearchResult {
   candidates: ProductCandidate[];
+  resultQuality?: ResultQualityEvaluation;
   returned?: number;
   totalFound?: number;
 }
@@ -43,6 +45,8 @@ export interface LookupOrchestratorOptions {
   searchCacheTtlSeconds?: number;
   stockCacheTtlSeconds?: number;
   priceCacheTtlSeconds?: number;
+  refinementCacheTtlSeconds?: number;
+  resultQualityMode?: ResultQualityMode;
   tenantStatus?: "demo" | "real";
 }
 
@@ -56,6 +60,8 @@ export class LookupOrchestrator {
   private readonly searchCacheTtlSeconds: number;
   private readonly stockCacheTtlSeconds: number;
   private readonly priceCacheTtlSeconds: number;
+  private readonly refinementCacheTtlSeconds: number;
+  private readonly resultQualityMode: ResultQualityMode;
   private readonly domainProfile: DomainProfileV2;
   private readonly source: string;
   private readonly tenantId: string;
@@ -69,6 +75,8 @@ export class LookupOrchestrator {
     this.searchCacheTtlSeconds = options.searchCacheTtlSeconds ?? 300;
     this.stockCacheTtlSeconds = options.stockCacheTtlSeconds ?? 30;
     this.priceCacheTtlSeconds = options.priceCacheTtlSeconds ?? 300;
+    this.refinementCacheTtlSeconds = options.refinementCacheTtlSeconds ?? 60;
+    this.resultQualityMode = options.resultQualityMode ?? "enforce";
     this.datasetLabel = options.datasetLabel;
     this.tenantStatus = options.tenantStatus ?? "demo";
     this.llmParser = options.llmParser;
@@ -92,6 +100,17 @@ export class LookupOrchestrator {
       metrics: telemetry.metrics,
       onAssistStart: telemetry.onAssistStart
     });
+    if (parsed.status === "capability_gap") {
+      return {
+        status: "capability_gap",
+        capabilityId: parsed.capabilityId,
+        capabilityLabel: parsed.capabilityLabel,
+        requiredFields: parsed.requiredFields,
+        suggestedReadOnlyTool: parsed.suggestedReadOnlyTool,
+        assist: parsed.assist,
+        ...this.capabilityGapMetadata(parsed)
+      };
+    }
     if (parsed.status === "unsupported") {
       this.triggerShadowParse(request.text, telemetry);
       return {
@@ -107,10 +126,17 @@ export class LookupOrchestrator {
       let searchResult = parsed.isExactCode
         ? {
             candidates: [attachEntity({ code: parsed.keyword, name: parsed.keyword }, metadata.entityType)],
+            resultQuality: {
+              acceptedCandidates: [],
+              bestCoverage: 1,
+              mode: this.resultQualityMode,
+              reason: "exact_code",
+              status: "accepted"
+            } satisfies ResultQualityEvaluation,
             returned: 1,
             totalFound: 1
           }
-        : await this.searchProductsByTerms(parsed.searchTerms, metadata.entityType);
+        : await this.searchProductsByTerms(parsed, metadata.entityType);
       let candidates = searchResult.candidates;
 
       if (candidates.length === 0) {
@@ -121,6 +147,19 @@ export class LookupOrchestrator {
           searchResult = assisted.searchResult;
           candidates = searchResult.candidates;
         } else {
+          const quality = assisted?.resultQuality ?? searchResult.resultQuality;
+          if (quality?.status === "needs_refinement" || quality?.status === "warn") {
+            this.triggerShadowParse(request.text, telemetry);
+            return {
+              status: "needs_refinement",
+              intent: parsed.intent,
+              keyword: parsed.keyword,
+              assist: assisted?.assist,
+              resultQuality: quality.status,
+              ...metadata,
+              parserPath: assisted?.assist ? "llm_assist" : metadata.parserPath
+            };
+          }
           this.triggerShadowParse(request.text, telemetry);
           return {
             status: "no_match",
@@ -208,16 +247,44 @@ export class LookupOrchestrator {
     }
   }
 
-  private async searchProductsByTerms(searchTerms: string[], entityType: string): Promise<CandidateSearchResult> {
-    for (const term of searchTerms) {
+  private async searchProductsByTerms(parsed: ParsedLookup, entityType: string): Promise<CandidateSearchResult> {
+    const refinementCacheKey = this.refinementCacheKey(parsed, entityType);
+    if (this.resultQualityMode === "enforce" && this.refinementCacheTtlSeconds > 0) {
+      const cached = await this.cache.get<ResultQualityEvaluation>(refinementCacheKey);
+      if (cached?.status === "needs_refinement") {
+        return { candidates: [], resultQuality: cached };
+      }
+    }
+
+    for (const term of parsed.searchTerms) {
       const result = await this.searchProducts(term, entityType);
       const relevantCandidates = result.products.filter((candidate) => productMatchesSearchTerm(candidate, term));
       if (relevantCandidates.length > 0) {
-        const keptAllReturnedProducts = relevantCandidates.length === result.products.length;
-        return {
+        const quality = evaluateResultQuality({
           candidates: relevantCandidates,
-          returned: keptAllReturnedProducts ? result.returned : relevantCandidates.length,
-          totalFound: keptAllReturnedProducts ? result.totalFound : relevantCandidates.length
+          isExactCode: parsed.isExactCode,
+          keyword: parsed.keyword,
+          mode: this.resultQualityMode,
+          profile: this.businessProfile,
+          searchTerms: parsed.searchTerms
+        });
+        if (quality.status === "needs_refinement") {
+          await this.cacheRefinementResult(refinementCacheKey, quality);
+          return {
+            candidates: [],
+            resultQuality: quality,
+            returned: relevantCandidates.length,
+            totalFound: result.totalFound
+          };
+        }
+        const keptAllReturnedProducts =
+          quality.acceptedCandidates.length === result.products.length &&
+          quality.acceptedCandidates.length === relevantCandidates.length;
+        return {
+          candidates: quality.acceptedCandidates,
+          resultQuality: quality,
+          returned: keptAllReturnedProducts ? result.returned : quality.acceptedCandidates.length,
+          totalFound: keptAllReturnedProducts ? result.totalFound : quality.acceptedCandidates.length
         };
       }
     }
@@ -258,7 +325,7 @@ export class LookupOrchestrator {
     telemetry: LookupTelemetryOptions
   ): Promise<
     | { status: "found"; parsed: ParsedLookup; searchResult: CandidateSearchResult }
-    | { status: "not_found"; assist: LlmAssistInfo }
+    | { status: "not_found"; assist: LlmAssistInfo; resultQuality?: ResultQualityEvaluation }
     | undefined
   > {
     if (this.llmParserMode !== "assist" || !this.llmParser || parsed.source === "llm") return undefined;
@@ -302,11 +369,20 @@ export class LookupOrchestrator {
     const searchResult = assistedParsed.isExactCode
       ? {
           candidates: [attachEntity({ code: assistedParsed.keyword, name: assistedParsed.keyword }, metadata.entityType)],
+          resultQuality: {
+            acceptedCandidates: [],
+            bestCoverage: 1,
+            mode: this.resultQualityMode,
+            reason: "exact_code",
+            status: "accepted"
+          } satisfies ResultQualityEvaluation,
           returned: 1,
           totalFound: 1
         }
-      : await this.searchProductsByTerms(assistedParsed.searchTerms, metadata.entityType);
-    if (searchResult.candidates.length === 0) return { status: "not_found", assist };
+      : await this.searchProductsByTerms(assistedParsed, metadata.entityType);
+    if (searchResult.candidates.length === 0) {
+      return { status: "not_found", assist, resultQuality: searchResult.resultQuality };
+    }
     return { status: "found", parsed: assistedParsed, searchResult };
   }
 
@@ -350,6 +426,16 @@ export class LookupOrchestrator {
     const value = await fetcher();
     await this.cache.set(key, value, ttlSeconds);
     return value;
+  }
+
+  private async cacheRefinementResult(key: string, quality: ResultQualityEvaluation): Promise<void> {
+    if (this.refinementCacheTtlSeconds <= 0) return;
+    await this.cache.set(key, quality, this.refinementCacheTtlSeconds);
+  }
+
+  private refinementCacheKey(parsed: ParsedLookup, entityType: string): string {
+    const joinedTerms = [parsed.keyword, ...parsed.searchTerms].join("|");
+    return `lookup:${this.tenantId}:entity:${entityType}:refinement:v1:${normalizeCacheKey(joinedTerms)}`;
   }
 
   private triggerShadowParse(text: string, telemetry: LookupTelemetryOptions): void {
@@ -400,6 +486,22 @@ export class LookupOrchestrator {
       tenantId: this.tenantId
     };
   }
+
+  private capabilityGapMetadata(parsed: Extract<ParseOutcome, { status: "capability_gap" }>): {
+    entityType: string;
+    source: string;
+    tenantId: string;
+  } & ConversationMetadata {
+    return {
+      conversationScope: parsed.conversationScope ?? "lookup_like",
+      entityType: parsed.entityType ?? this.domainProfile.defaultEntityType,
+      outOfScopeCategory: parsed.outOfScopeCategory ?? "none",
+      parserPath: parsed.parserPath ?? (parsed.source === "llm" || parsed.assist ? "llm_assist" : "deterministic"),
+      replyPolicy: parsed.replyPolicy ?? "lookup",
+      source: "none",
+      tenantId: this.tenantId
+    };
+  }
 }
 
 function multipleMatches(
@@ -418,9 +520,9 @@ function multipleMatches(
 ): LookupResult {
   const totalFound = searchResult.totalFound ?? searchResult.candidates.length;
   const pageSize = MULTI_MATCH_PAGE_SIZE;
-  return {
-    status: "multiple_matches",
-    ...metadata,
+    return {
+      status: "multiple_matches",
+      ...metadata,
     intent: parsed.intent,
     keyword: parsed.keyword,
     candidates: searchResult.candidates,
@@ -429,10 +531,12 @@ function multipleMatches(
     pageSize,
     pageStart: 0,
     returned: searchResult.returned ?? searchResult.candidates.length,
-    totalFound,
-    assist: parsed.assist
-  };
-}
+      totalFound,
+      resultQuality:
+        searchResult.resultQuality?.status === "needs_refinement" ? undefined : searchResult.resultQuality?.status,
+      assist: parsed.assist
+    };
+  }
 
 function attachSearchEntities(result: ProductSearchResult, entityType: string): ProductSearchResult {
   return {

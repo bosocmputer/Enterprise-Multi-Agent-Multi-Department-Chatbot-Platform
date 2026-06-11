@@ -15,7 +15,7 @@ Pilot service:
 - Server path: `/home/bosscatdog/parts-lookup-chatbot`
 - Data source: SML MCP `http://192.168.2.248:3515`; currently treated as real SML data for this construction-materials profile.
 - Business Profile: `profiles/construction-demo.json`
-- Optional LLM parser: LiteLLM `http://192.168.2.248:4000`, model `openrouter/openrouter/free`, enabled only by `.env`.
+- Optional LLM parser: LiteLLM `http://192.168.2.248:4000`, routed through `parts-lookup-parser-auto` when enabled by `.env`. The router can choose among configured provider models; the app still treats SML as the only source of stock/price facts.
 
 Telegram polling is enabled on the pilot server. LINE is implemented behind env flags and requires LINE credentials plus public tunnel config. Dev alerts can use a separate Telegram alert bot via `ALERT_TELEGRAM_BOT_TOKEN`. Keep all tokens only in server `.env`; never commit or paste them into docs.
 

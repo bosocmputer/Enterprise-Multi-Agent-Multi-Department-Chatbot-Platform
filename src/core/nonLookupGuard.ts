@@ -6,8 +6,10 @@ export type NonLookupKind =
   | "emoji_only"
   | "greeting"
   | "help_question"
+  | "lookup_coaching"
   | "out_of_scope_current_info"
   | "out_of_scope_general"
+  | "recommendation_guidance"
   | "thanks";
 
 const friendlyReasonPrefix = "friendly_";
@@ -21,6 +23,8 @@ export function classifyNonLookupText(text: string): NonLookupKind | undefined {
   const compact = stripPoliteSuffix(normalized);
   if (isOutOfScopeCurrentInfo(compact)) return "out_of_scope_current_info";
   if (isOutOfScopeGeneral(compact)) return "out_of_scope_general";
+  if (isLookupCoaching(compact)) return "lookup_coaching";
+  if (isRecommendationGuidance(compact)) return "recommendation_guidance";
   if (isHelpQuestion(compact)) return "help_question";
   if (isGreeting(compact)) return "greeting";
   if (isThanks(compact)) return "thanks";
@@ -57,6 +61,7 @@ export function metadataForNonLookupKind(kind: NonLookupKind): ConversationMetad
 }
 
 export function conversationScopeForKind(kind: NonLookupKind): ConversationScope {
+  if (kind === "lookup_coaching" || kind === "recommendation_guidance") return "coaching";
   if (kind === "help_question") return "help";
   if (kind === "out_of_scope_current_info") return "out_of_scope_current_info";
   if (kind === "out_of_scope_general") return "out_of_scope_general";
@@ -70,6 +75,7 @@ export function outOfScopeCategoryForKind(kind: NonLookupKind): OutOfScopeCatego
 }
 
 export function replyPolicyForKind(kind: NonLookupKind): ReplyPolicy {
+  if (kind === "lookup_coaching" || kind === "recommendation_guidance") return "coaching";
   if (kind === "help_question") return "help";
   if (isOutOfScopeKind(kind)) return "refuse_redirect";
   return "friendly";
@@ -86,6 +92,37 @@ function isHelpQuestion(text: string): boolean {
     "help",
     "how to use"
   ].includes(text);
+}
+
+function isLookupCoaching(text: string): boolean {
+  return [
+    /ควรถาม/u,
+    /ถามต่อยังไง/u,
+    /ถามยังไง/u,
+    /ควรค้น/u,
+    /ค้นด้วยคำไหน/u,
+    /คำค้นที่ควรใช้/u,
+    /ช่วยตีความคำค้น/u,
+    /ช่วยแนะนำ.*ค้น/u,
+    /ถ้าหา.*ไม่เจอ/u,
+    /how should .*search/i,
+    /what should .*search/i
+  ].some((pattern) => pattern.test(text));
+}
+
+function isRecommendationGuidance(text: string): boolean {
+  return [
+    /ใกล้เคียง/u,
+    /คล้าย/u,
+    /แทน(กัน)?ได้/u,
+    /ถูกกว่า/u,
+    /ราคาถูกกว่า/u,
+    /ตัวเลือกอื่น/u,
+    /ของถูกสุด/u,
+    /ตัวไหน.*ถูก/u,
+    /อันไหน.*ถูก/u,
+    /แบบไหนดี/u
+  ].some((pattern) => pattern.test(text));
 }
 
 function isOutOfScopeCurrentInfo(text: string): boolean {
@@ -159,8 +196,10 @@ function isNonLookupKind(value: string): value is NonLookupKind {
     "emoji_only",
     "greeting",
     "help_question",
+    "lookup_coaching",
     "out_of_scope_current_info",
     "out_of_scope_general",
+    "recommendation_guidance",
     "thanks"
   ].includes(value);
 }

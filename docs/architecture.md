@@ -17,10 +17,11 @@
 | LINE adapter | Verify LINE signature from raw body, normalize events, enforce mention/prefix rules, apply short follow-up context, send replies. | `src/channels/lineAdapter.ts` |
 | Business Profile | Tenant-specific Domain Profile v2 entities/actions/connectors, phrases, examples, aliases, locale, data-source labels, and reply style. Must be data/config, not hardcoded source. | `src/config/businessProfile.ts`, `profiles/*.json` |
 | Query understanding | Classify tenant action/entity/query using context, Business Profile, alias/index expansion, and optional LLM when needed. | `src/core/queryParser.ts`, `src/core/queryUnderstanding.ts`, `src/core/llmParser.ts` |
+| Capability classifier | Detect requestable-but-unsupported data needs from Business Profile capability enums, and return safe capability-gap replies without guessing or calling write tools. | `src/core/capabilityClassifier.ts` |
 | Lookup orchestrator | Resolve entity candidates, call cache/SML adapter, parallelize inventory stock and price, choose fallback behavior. | `src/core/lookupOrchestrator.ts`, `src/core/entityAdapter.ts` |
 | SML client | Call `/call`, enforce read-only tool allowlist, parse `content[0].text`, validate schemas. | `src/integrations/smlClient.ts` |
 | Cache/session | Redis cache, dedup, rate limit, readiness, multiple-match candidates, and last-entity context. | `src/services/cacheService.ts`, `src/services/redisStateService.ts` |
-| Audit/logging/metrics | Structured lookup logs, hashed chat/user IDs, Prometheus-style counters/histograms without secrets or raw sensitive payloads. | `src/core/lookupTelemetry.ts`, `src/observability/*` |
+| Audit/logging/metrics | Structured lookup logs, hashed chat/user IDs, optional feature-flagged QA trace, Prometheus-style counters/histograms without secrets or raw sensitive payloads. | `src/core/lookupTelemetry.ts`, `src/observability/*` |
 | Thai query evaluation | Offline PyThaiNLP analysis of reviewed/redacted no-match and unsupported examples to propose aliases, context guards, and regression fixtures. It is not imported by runtime code. | `tools/thai-query-eval/*` |
 | Slow jobs | Background retries, cache warming, alias/index refresh, optional LLM parsing. | `src/queues/*` |
 
@@ -44,6 +45,19 @@ SML owns:
 - price truth
 - SML-side role enforcement
 - ERP/business calculations
+
+## Data Acquisition Boundary
+
+Runtime data acquisition is intentionally narrow:
+
+- Source-backed lookup facts come only from configured read-only connectors. The current connector is SML MCP `/call`.
+- Current supported SML tools are `search_product`, `get_stock_balance`, and `get_product_price`.
+- Redis stores operational state only: dedup, rate limits, cache, and short-lived context.
+- LiteLLM can parse ambiguous text into validated structured fields; it cannot provide facts, choose arbitrary tools, or answer stock/price directly.
+- Business Profile supplies tenant vocabulary, action phrases, examples, reply copy, and capability mappings.
+- App analytics use logs, optional QA trace, `/metrics`, readiness-gate output, and reviewed transcripts; they do not require direct access to SML database tables.
+
+The service does not acquire data by direct SML Postgres access, arbitrary SQL, raw production exports, or write-capable MCP tools. See `data-acquisition.md` for the current source matrix.
 
 ## Default Data Flow
 
@@ -130,6 +144,7 @@ Rules:
 | Parser cannot find intent | Reply with profile-driven unsupported/help-lite copy; do not invent lookup facts. |
 | Friendly non-lookup text | Greeting, thanks, acknowledgement, help-style, sticker-only, or emoji-only messages return profile-driven friendly copy and do not call LLM/SML. |
 | Out-of-scope current/general question | Weather, news, lottery, exchange rate, recipes, jokes, or other non-lookup questions get a polite redirect back to tenant lookup. Do not call SML or LiteLLM stock/price parser. |
+| Capability gap | Business-relevant but unsupported data requests, such as cost, supplier, promotion, reserved stock, lot/serial, lead time, sales history, or customer-specific price, return profile-driven capability-gap copy. Do not call SML fact tools or let LLM invent MCP names. |
 | LLM parser invalid/timeout | Treat as unsupported or no-match; if configured, show safe assist failure copy without raw provider outcomes, raw prompt, raw provider payload, token, or source facts. Keep true outcomes in logs/metrics. |
 | No entity found | Ask for clearer ID, model, descriptor, or keyword. |
 | Multiple entities found | Present current-page choices and ask the user to choose. If the local candidate buffer is exhausted while the source reports more matches, ask the user to refine the query. |
@@ -159,3 +174,4 @@ Rules:
 - Business Profile changes must be validated and rollbackable like config changes.
 - Redact secrets and sensitive identifiers in logs.
 - Use hashed chat/user IDs in analytics logs unless operational debugging requires controlled access to raw IDs.
+- Raw user text and bot replies may be logged only through QA trace flags for controlled staff pilot windows. Do not log chain-of-thought; store structured decision trace instead.

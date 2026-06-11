@@ -25,6 +25,7 @@ Use this as the short Codex index for this repository. Keep it under 10KB; put d
 - Current blueprint: `blueprint Enterprise Multi-Agent & Multi-Department Chatbot Platform.md`
 - Current state: `docs/current-state.md`
 - Architecture: `docs/architecture.md`
+- Data acquisition: `docs/data-acquisition.md`
 - Data flow: `docs/data-flow.md`
 - Domain model: `docs/domain.md`
 - SML MCP integration: `docs/sml-mcp-integration.md`

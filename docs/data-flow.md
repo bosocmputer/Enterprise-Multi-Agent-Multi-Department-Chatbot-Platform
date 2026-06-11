@@ -1,5 +1,7 @@
 # Data Flow
 
+The runtime data-acquisition rule is simple: channel messages and Business Profile data can shape the lookup, but user-facing facts must come from configured read-only connectors. In the current pilot, SML MCP is the only source of product search, stock, and price facts. LiteLLM is a parser only.
+
 ## 1. Fast Lookup
 
 Use this path for clear entity ID or keyword queries that the tenant Business Profile can parse deterministically. In the current pilot, the entity is an SML inventory item and the actions are availability/price.
@@ -98,7 +100,23 @@ Assist rules:
 - Reject assist output on timeout, malformed JSON, invalid schema, low confidence, empty keyword/search terms, or truncated provider completion.
 - Never use LLM output as lookup facts; SML remains the only source for current inventory facts.
 
-## 4. Multiple Matches
+## 4. Capability Gap
+
+```text
+message asks for a declared requestable capability
+-> classify from Business Profile phrases, or LiteLLM enum-only assist
+-> do not call SML fact/detail tools
+-> reply that the source-system/SML team should add a read-only MCP for that capability
+-> audit outcome=capability_gap and capability id
+```
+
+Rules:
+
+- Do not use capability gaps for normal no-match, broad search, or SML timeout.
+- Suggested MCP names come only from Business Profile, never from raw user text or LLM output.
+- Optional `/ready` tool discovery can warn if suggested MCP tools are not present, but discovery must not choose tools for runtime calls.
+
+## 5. Multiple Matches
 
 ```text
 connector search(query) returns many candidates
@@ -111,7 +129,7 @@ connector search(query) returns many candidates
 
 The bot must not choose an entity when confidence is insufficient.
 
-## 5. SML Timeout
+## 6. SML Timeout
 
 ```mermaid
 sequenceDiagram
@@ -136,7 +154,7 @@ Rules:
 - Retry must be bounded.
 - Do not spam the channel with late replies unless the user experience explicitly supports it.
 
-## 6. Channel Group Gate
+## 7. Channel Group Gate
 
 Telegram group accepts a message only if one is true:
 
@@ -152,7 +170,7 @@ LINE group accepts a message only if one is true:
 
 Private chats do not require mention.
 
-## 7. Audit Event Shape
+## 8. Audit Event Shape
 
 Minimum event fields:
 

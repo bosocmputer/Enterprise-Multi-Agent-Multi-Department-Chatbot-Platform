@@ -81,6 +81,32 @@ export class SmlClientError extends Error {
   }
 }
 
+function extractToolNames(value: unknown): string[] {
+  const toolLikeItems = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.tools)
+      ? value.tools
+      : isRecord(value) && Array.isArray(value.data)
+        ? value.data
+        : [];
+
+  return [
+    ...new Set(
+      toolLikeItems
+        .map((item) => {
+          if (typeof item === "string") return item;
+          if (isRecord(item) && typeof item.name === "string") return item.name;
+          return undefined;
+        })
+        .filter((item): item is string => Boolean(item))
+    )
+  ];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export interface SmlClientOptions {
   baseUrl: string;
   accessMode: string;
@@ -114,6 +140,23 @@ export class SmlClient {
     } catch {
       return false;
     }
+  }
+
+  async listTools(): Promise<string[]> {
+    const response = await this.fetchWithTimeout(`${this.options.baseUrl}/tools`, {
+      method: "GET",
+      headers: { "mcp-access-mode": this.options.accessMode }
+    });
+    if (!response.ok) {
+      throw new SmlClientError(`SML tools HTTP ${response.status}`, "http_error");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await response.text());
+    } catch {
+      throw new SmlClientError("Invalid SML tools response", "invalid_response");
+    }
+    return extractToolNames(parsed);
   }
 
   async searchProduct(keyword: string, limit = 5): Promise<ProductCandidate[]> {

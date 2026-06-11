@@ -64,6 +64,14 @@ LLM_PARSER_TIMEOUT_MS
 LLM_MIN_CONFIDENCE
 LLM_MAX_CONCURRENT_CALLS
 LLM_ASSIST_QUEUE_WAIT_MS
+CAPABILITY_GAP_SHOW_TECHNICAL_HINT
+QA_TRACE_ENABLED
+QA_TRACE_INCLUDE_RAW_TEXT
+QA_TRACE_INCLUDE_BOT_REPLY
+QA_TRACE_MAX_TEXT_CHARS
+QA_TRACE_REDACT_SECRETS
+QA_TRACE_SAMPLE_RATE
+QA_TRACE_TTL_DAYS
 LOG_LEVEL
 ALERTS_ENABLED
 ALERT_TELEGRAM_BOT_TOKEN
@@ -149,6 +157,7 @@ curl -fsS -X POST http://localhost:<port>/internal/parse \
 - Alert bot chat initialized by sending `/start` to the alert bot before enabling `ALERTS_ENABLED=true`.
 - LINE webhook signature smoke passed before LINE rollout.
 - SML read-only smoke passed.
+- Capability-gap readiness warnings reviewed; missing suggested MCP tools are understood before staff testing.
 - No write SML tool in allowlist.
 - Redis connectivity verified.
 - `/metrics` exposes lookup, Telegram, and SML tool metrics without secrets.
@@ -166,6 +175,8 @@ curl -fsS -X POST http://localhost:<port>/internal/parse \
 
 The parser is optional and must never answer stock or price facts. It only emits structured lookup JSON that the app validates before using.
 
+For the detailed LiteLLM UI/API setup guide, see `litellm-router-setup-th.md`.
+
 Recommended pilot assist config:
 
 ```text
@@ -173,8 +184,8 @@ LLM_PARSER_ENABLED=true
 LLM_PARSER_MODE=assist
 LLM_PROVIDER=litellm
 LITELLM_BASE_URL=http://192.168.2.248:4000
-LITELLM_MODEL=openrouter/openrouter/free
-LLM_PARSER_TIMEOUT_MS=6000
+LITELLM_MODEL=parts-lookup-parser-auto-2
+LLM_PARSER_TIMEOUT_MS=30000
 LLM_MIN_CONFIDENCE=0.75
 LLM_MAX_CONCURRENT_CALLS=2
 LLM_ASSIST_QUEUE_WAIT_MS=5000
@@ -184,7 +195,34 @@ ASSIST_STATUS_MIN_DELAY_MS=800
 ASSIST_RESULT_FOOTER_ENABLED=true
 ```
 
-Store the key only in server `.env` as `LITELLM_API_KEY` or `OPENAI_API_KEY`. The current LiteLLM Swagger requires the `x-litellm-api-key` header; do not commit the key. In assist mode the LLM may only provide structured intent/search terms; SML remains the source of truth for stock and price. Telegram may show the LiteLLM model/status on slow-path messages, while LINE uses loading animation only for one-on-one chats. Roll back by changing `LLM_PARSER_MODE=shadow` or `off` and recreating the app container.
+Store the key only in server `.env` as `LITELLM_API_KEY` or `OPENAI_API_KEY`. The current LiteLLM Swagger requires the `x-litellm-api-key` header; do not commit the key. In assist mode the LLM may only provide structured intent/search terms; SML remains the source of truth for stock and price. Telegram may show the LiteLLM model/status on slow-path messages, while LINE uses loading animation only for one-on-one chats. The current pilot server uses a longer `LLM_PARSER_TIMEOUT_MS=30000` to expose model latency clearly during staff testing; lower it before wider production rollout if backlog or waiting UX becomes a problem. Roll back by changing `LLM_PARSER_MODE=shadow` or `off` and recreating the app container.
+
+## QA Trace Pilot Config
+
+QA trace is for reviewed staff pilot debugging. It can record raw user text and bot replies only when explicitly enabled; normal metrics still use hashes/labels.
+
+Recommended short staff-test config:
+
+```text
+QA_TRACE_ENABLED=true
+QA_TRACE_INCLUDE_RAW_TEXT=true
+QA_TRACE_INCLUDE_BOT_REPLY=true
+QA_TRACE_MAX_TEXT_CHARS=1000
+QA_TRACE_REDACT_SECRETS=true
+QA_TRACE_SAMPLE_RATE=1
+QA_TRACE_TTL_DAYS=14
+```
+
+Before wider production rollout, either disable raw transcript capture or lower sampling:
+
+```text
+QA_TRACE_ENABLED=true
+QA_TRACE_INCLUDE_RAW_TEXT=false
+QA_TRACE_INCLUDE_BOT_REPLY=false
+QA_TRACE_SAMPLE_RATE=0.1
+```
+
+`QA_TRACE_TTL_DAYS` is written as metadata for operators; actual deletion depends on Docker/server log retention. Do not export QA logs into the repository.
 
 ## Git-Based Pilot Deploy
 

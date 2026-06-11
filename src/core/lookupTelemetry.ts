@@ -23,6 +23,7 @@ export async function runLookupWithTelemetry(
     {
       action: "action" in result ? result.action : undefined,
       cacheHit: "cacheHit" in result ? result.cacheHit : undefined,
+      capabilityId: result.status === "capability_gap" ? result.capabilityId : undefined,
       channel,
       chatHash: hashIdentifier(request.chatId),
       conversationScope: result.conversationScope,
@@ -33,6 +34,7 @@ export async function runLookupWithTelemetry(
       outOfScopeCategory: result.outOfScopeCategory,
       parserPath: result.parserPath,
       replyPolicy: result.replyPolicy,
+      resultQuality: "resultQuality" in result ? result.resultQuality : undefined,
       source: "source" in result ? result.source : undefined,
       status: result.status,
       tenantId: "tenantId" in result ? result.tenantId : undefined,

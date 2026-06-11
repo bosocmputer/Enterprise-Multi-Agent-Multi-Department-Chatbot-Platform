@@ -5,16 +5,19 @@ import {
   actionForLegacyIntent,
   legacyIntentForAction,
   normalizeDomainProfile,
+  requestableCapabilities,
   type BusinessProfile
 } from "../config/businessProfile.js";
 import type { LiteLlmClient } from "../integrations/litellmClient.js";
 import { LiteLlmClientError } from "../integrations/litellmClient.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
-import type { LookupActionId, LookupIntent } from "./types.js";
+import { capabilityGapDetailsForId } from "./capabilityClassifier.js";
+import type { CapabilityGapDetails, LookupActionId, LookupIntent } from "./types.js";
 
 const llmParseJsonSchema = z
   .object({
     action: z.string().trim().min(1).optional(),
+    capability: z.string().trim().min(1).optional(),
     confidence: z.number().min(0).max(1),
     entityType: z.string().trim().min(1).optional(),
     intent: z.enum(["search_product", "stock", "price", "stock_price", "unsupported"]).optional(),
@@ -54,6 +57,7 @@ export type LlmParseResult =
       entityType?: string;
       intent: LookupIntent | "unsupported";
       keyword: string;
+      capabilityGap?: CapabilityGapDetails;
       model?: string;
       query: string;
       searchTerms: string[];
@@ -114,12 +118,12 @@ export class BusinessProfileLlmParser implements LookupLlmParser {
         return { model: completion.model, reason: "invalid_schema", status: "rejected" };
       }
 
-      const normalized = normalizeParsedLlmOutput(parsed.data, this.options.profile);
+      const normalized = normalizeParsedLlmOutput(parsed.data, this.options.profile, text);
       if (!normalized) {
         return { model: completion.model, reason: "invalid_schema", status: "rejected" };
       }
 
-      if (!normalized.query.trim()) {
+      if (!normalized.query.trim() && !normalized.capabilityGap) {
         return { model: completion.model, reason: "empty_keyword", status: "rejected" };
       }
 
@@ -129,6 +133,7 @@ export class BusinessProfileLlmParser implements LookupLlmParser {
 
       return {
         action: normalized.action,
+        capabilityGap: normalized.capabilityGap,
         confidence: parsed.data.confidence,
         entityType: normalized.entityType,
         intent: normalized.intent,
@@ -234,6 +239,7 @@ export async function runLlmParseWithTelemetry(
     {
       confidence: result.status === "parsed" ? result.confidence : undefined,
       action: result.status === "parsed" ? result.action : undefined,
+      capabilityId: result.status === "parsed" ? result.capabilityGap?.capabilityId : undefined,
       durationMs,
       entityType: result.status === "parsed" ? result.entityType : undefined,
       intent: result.status === "parsed" ? result.intent : undefined,
@@ -249,7 +255,7 @@ export async function runLlmParseWithTelemetry(
 }
 
 export function llmParseOutcome(result: LlmParseResult): string {
-  if (result.status === "parsed") return result.intent === "unsupported" ? "unsupported" : "parsed";
+  if (result.status === "parsed") return result.capabilityGap ? "capability_gap" : result.intent === "unsupported" ? "unsupported" : "parsed";
   return `rejected_${result.reason}`;
 }
 
@@ -266,8 +272,8 @@ function buildMessages(text: string, profile: BusinessProfile) {
       content:
         "You are a strict JSON parser for Thai business lookup messages. Output JSON only. No reasoning. No prose. " +
         "Do not answer business facts or choose a result. Map the message to an allowed action and entity type only. " +
-        'Schema: {"action":"allowed action id","entityType":"allowed entity type","query":"string","confidence":0.0,"searchTerms":["string"]}. ' +
-        "Use searchTerms only as possible source-system lookup terms. If unsupported, use intent=unsupported."
+        'Schema: {"action":"allowed action id","entityType":"allowed entity type","query":"string","confidence":0.0,"searchTerms":["string"],"capability":"optional requestable capability id"}. ' +
+        "Use searchTerms only as possible source-system lookup terms. If the message asks for requestable but unsupported data, use intent=unsupported and capability from the provided capability ids. Never invent tool names. If unsupported, use intent=unsupported."
     },
     {
       role: "user" as const,
@@ -276,6 +282,11 @@ function buildMessages(text: string, profile: BusinessProfile) {
           id: action.id,
           legacyIntent: action.legacyIntent,
           phrases: action.phrases.slice(0, 8)
+        })),
+        requestableCapabilities: requestableCapabilities(profile).map((capability) => ({
+          id: capability.id,
+          label: capability.label,
+          phrases: capability.phrases.slice(0, 8)
         })),
         defaultEntityType: domain.defaultEntityType,
         entityTypes: domain.entities.map((entity) => entity.type),
@@ -290,10 +301,12 @@ function buildMessages(text: string, profile: BusinessProfile) {
 
 function normalizeParsedLlmOutput(
   data: z.infer<typeof llmParseJsonSchema>,
-  profile: BusinessProfile
+  profile: BusinessProfile,
+  text: string
 ):
   | {
       action?: LookupActionId;
+      capabilityGap?: CapabilityGapDetails;
       entityType: string;
       intent: LookupIntent | "unsupported";
       query: string;
@@ -306,6 +319,18 @@ function normalizeParsedLlmOutput(
     ...domain.actions.flatMap((action) => action.entityTypes)
   ]);
   const query = (data.query ?? data.keyword ?? "").trim();
+  if (data.capability) {
+    const capabilityGap = capabilityGapDetailsForId(data.capability, profile, "llm");
+    if (!capabilityGap) return undefined;
+    if (data.entityType && !allowedEntityTypes.has(data.entityType)) return undefined;
+    return {
+      capabilityGap,
+      entityType: normalizeEntityType(data.entityType, allowedEntityTypes, domain.defaultEntityType) ?? capabilityGap.entityType ?? domain.defaultEntityType,
+      intent: "unsupported",
+      query: query || text.trim()
+    };
+  }
+
   const requestedAction = data.action?.trim();
   const action = requestedAction ? domain.actions.find((item) => item.id === requestedAction) : undefined;
   if (requestedAction && !action) return undefined;

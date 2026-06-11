@@ -70,6 +70,46 @@ describe("BusinessProfileLlmParser", () => {
     });
   });
 
+  it("accepts requestable capability gaps from the profile enum", async () => {
+    const parser = parserFor(
+      JSON.stringify({
+        capability: "purchase_cost",
+        confidence: 0.96,
+        entityType: "inventory_item",
+        intent: "unsupported",
+        query: "PAINT-01424 ราคาทุน",
+        searchTerms: ["PAINT-01424"]
+      })
+    );
+
+    await expect(parser.parse("PAINT-01424 ราคาทุน")).resolves.toMatchObject({
+      capabilityGap: {
+        capabilityId: "purchase_cost",
+        capabilityLabel: "ราคาทุน/ต้นทุน",
+        suggestedReadOnlyTool: "get_product_cost"
+      },
+      intent: "unsupported",
+      status: "parsed"
+    });
+  });
+
+  it("rejects capability ids that are not declared in the profile", async () => {
+    await expect(
+      parserFor(
+        JSON.stringify({
+          capability: "drop_database",
+          confidence: 0.96,
+          intent: "unsupported",
+          query: "ขอลบข้อมูล",
+          searchTerms: ["ขอลบข้อมูล"]
+        })
+      ).parse("ขอลบข้อมูล")
+    ).resolves.toMatchObject({
+      reason: "invalid_schema",
+      status: "rejected"
+    });
+  });
+
   it("rejects malformed JSON", async () => {
     await expect(parserFor("{").parse("มีปูนไหม")).resolves.toMatchObject({
       reason: "invalid_json",

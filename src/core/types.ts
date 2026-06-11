@@ -3,6 +3,7 @@ export type LookupIntent = "search_product" | "stock" | "price" | "stock_price";
 export type LookupActionId = string;
 
 export type ConversationScope =
+  | "coaching"
   | "friendly"
   | "help"
   | "lookup_like"
@@ -13,7 +14,7 @@ export type OutOfScopeCategory = "current_info" | "general" | "none";
 
 export type ParserPath = "deterministic" | "llm_assist" | "none";
 
-export type ReplyPolicy = "friendly" | "help" | "lookup" | "refuse_redirect";
+export type ReplyPolicy = "coaching" | "friendly" | "help" | "lookup" | "refuse_redirect";
 
 export interface ConversationMetadata {
   conversationScope?: ConversationScope;
@@ -34,8 +35,18 @@ export interface LookupDomainMetadata {
   action?: LookupActionId;
   confidenceBand?: "high" | "medium" | "low" | "none";
   entityType?: string;
+  resultQuality?: "accepted" | "needs_refinement" | "not_checked" | "warn";
   source?: string;
   tenantId?: string;
+}
+
+export interface CapabilityGapDetails {
+  capabilityId: string;
+  capabilityLabel: string;
+  entityType?: string;
+  requiredFields?: string[];
+  source: "llm" | "profile";
+  suggestedReadOnlyTool?: string;
 }
 
 export type LlmAssistReason = "no_match_retry" | "unsupported";
@@ -69,6 +80,20 @@ export type ParseOutcome =
       searchTerms: string[];
       assist?: LlmAssistInfo;
       source?: "deterministic" | "llm";
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
+    }
+  | {
+      status: "capability_gap";
+      assist?: LlmAssistInfo;
+      capabilityId: string;
+      capabilityLabel: string;
+      entityType?: string;
+      requiredFields?: string[];
+      source: "llm" | "profile";
+      suggestedReadOnlyTool?: string;
       conversationScope?: ConversationScope;
       outOfScopeCategory?: OutOfScopeCategory;
       parserPath?: ParserPath;
@@ -156,6 +181,21 @@ export type LookupResult =
       replyPolicy?: ReplyPolicy;
     }
   | {
+      status: "needs_refinement";
+      action?: LookupActionId;
+      entityType?: string;
+      intent: LookupIntent;
+      keyword: string;
+      resultQuality: "needs_refinement" | "warn";
+      source?: string;
+      tenantId?: string;
+      assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
+    }
+  | {
       status: "multiple_matches";
       action?: LookupActionId;
       intent: LookupIntent;
@@ -170,6 +210,7 @@ export type LookupResult =
       source?: string;
       tenantId?: string;
       totalFound?: number;
+      resultQuality?: "accepted" | "not_checked" | "warn";
       assist?: LlmAssistInfo;
       conversationScope?: ConversationScope;
       outOfScopeCategory?: OutOfScopeCategory;
@@ -182,6 +223,22 @@ export type LookupResult =
       entityType?: string;
       reason: string;
       source?: string;
+      tenantId?: string;
+      assist?: LlmAssistInfo;
+      conversationScope?: ConversationScope;
+      outOfScopeCategory?: OutOfScopeCategory;
+      parserPath?: ParserPath;
+      replyPolicy?: ReplyPolicy;
+    }
+  | {
+      status: "capability_gap";
+      action?: LookupActionId;
+      capabilityId: string;
+      capabilityLabel: string;
+      entityType?: string;
+      requiredFields?: string[];
+      source?: string;
+      suggestedReadOnlyTool?: string;
       tenantId?: string;
       assist?: LlmAssistInfo;
       conversationScope?: ConversationScope;

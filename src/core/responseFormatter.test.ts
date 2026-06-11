@@ -96,6 +96,21 @@ describe("response formatter", () => {
     expect(reply.split("\n").filter((line) => line.startsWith("- "))).toHaveLength(0);
   });
 
+  it("formats recommendation guidance with profile copy", () => {
+    const reply = formatLookupReply(
+      {
+        conversationScope: "coaching",
+        parserPath: "none",
+        reason: "friendly_recommendation_guidance",
+        replyPolicy: "coaching",
+        status: "unsupported"
+      },
+      profile
+    );
+
+    expect(reply).toBe(profile.replyStyle.recommendationGuidanceMessage);
+  });
+
   it("formats out-of-scope current info as a polite redirect", () => {
     const reply = formatLookupReply(
       {
@@ -141,6 +156,43 @@ describe("response formatter", () => {
 
     expect(reply).toContain("ระบบต้นทาง");
     expect(reply).not.toContain("ระบบ SML");
+  });
+
+  it("formats capability gaps without technical MCP hints by default", () => {
+    const reply = formatLookupReply(
+      {
+        capabilityId: "purchase_cost",
+        capabilityLabel: "ราคาทุน/ต้นทุน",
+        entityType: "inventory_item",
+        source: "none",
+        status: "capability_gap",
+        suggestedReadOnlyTool: "get_product_cost",
+        tenantId: "construction-demo"
+      },
+      profile
+    );
+
+    expect(reply).toContain("เพิ่ม read-only MCP สำหรับ ราคาทุน/ต้นทุน");
+    expect(reply).not.toContain("get_product_cost");
+  });
+
+  it("formats capability gaps with technical MCP hints when enabled", () => {
+    const reply = formatLookupReply(
+      {
+        capabilityId: "purchase_cost",
+        capabilityLabel: "ราคาทุน/ต้นทุน",
+        entityType: "inventory_item",
+        source: "none",
+        status: "capability_gap",
+        suggestedReadOnlyTool: "get_product_cost",
+        tenantId: "construction-demo"
+      },
+      profile,
+      { capabilityGapShowTechnicalHint: true }
+    );
+
+    expect(reply).toContain("เพิ่ม read-only MCP สำหรับ ราคาทุน/ต้นทุน");
+    expect(reply).toContain("MCP ที่แนะนำ: get_product_cost");
   });
 
   it("asks users to refine when source has more results than the local candidate buffer", () => {

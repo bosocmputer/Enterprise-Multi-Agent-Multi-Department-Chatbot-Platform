@@ -19,6 +19,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> npm run qa:readiness
 | --- | --- |
 | Business Profile | schema validation, missing profile, disabled intent, Domain Profile v2 normalization, required entity/action/read-only connector mapping, read-only connector allowlist, tenant examples, alias expansion, invalid profile rollback behavior. |
 | Query parser/understanding | tenant action/entity/query extraction, stock, price, stock+price, search-only, unsupported text, friendly non-lookup guard, out-of-scope current/general question guard, Thai/English variants from Business Profile, entity ID, barcode-like input, context-only follow-up. |
+| Capability gap | profile-declared requestable capabilities, no-match not misclassified as capability gap, SML timeout not misclassified, LLM capability enum allowlist, write-like suggested MCP rejection, user copy without invented tool names. |
 | LLM slow-path parser | LiteLLM request shape, generic JSON parser output, malformed JSON, wrong enum/action, empty query/searchTerms, low confidence, timeout, truncated completion, queue timeout/concurrency guard, shadow mode no user-facing change, assist status/footer/failure copy. |
 | Thai query evaluation | PyThaiNLP tokenization fixture, custom dictionary from Business Profile aliases/examples, sensitive-key rejection, context-required phrase suggestions. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
@@ -26,13 +27,14 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> npm run qa:readiness
 | SML client | allowed tool call, blocked write tool, timeout, malformed JSON, missing `content[0].text`, schema mismatch. |
 | Cache | hit/miss, tenant/entity/action-scoped keys, TTL choice, no error cached as success, short negative cache. |
 | Formatter | no match, multi match, success with stock only, success with price only, timeout fallback. |
-| Redaction | logs do not include tokens, raw secrets, or large raw SML payloads. |
+| Batch/coaching/result quality | bounded multi-line split, context-only batch rejection, coaching without SML/LLM, broad weak-match `needs_refinement`, exact-code bypass. |
+| Redaction / QA trace | default logs do not include tokens, raw secrets, raw chat/user IDs, or large raw SML payloads. Optional QA trace must redact secrets, cap raw text length, and store structured decision trace instead of chain-of-thought. |
 
 Latest local run on 2026-06-11:
 
-- `npm test`: 19 files, 123 tests passed.
+- `npm test`: 21 files, 153 tests passed.
 - `npm run build`: passed.
-- Latest server deploy smoke on `192.168.2.109:3060`: passed at git SHA `763893c4b4de`.
+- Latest observed server `/health` on `192.168.2.109:3060`: passed with `gitSha=763893c4b4de`, dataset `sml-192.168.2.248`, and `tenantStatus=real`.
 
 ## Integration Tests
 
@@ -83,6 +85,13 @@ Current covered cases:
 - Lookup metrics include `tenant`, `entity_type`, `action`, `source`, `confidence_band`, `conversation_scope`, `out_of_scope_category`, `parser_path`, and `reply_policy` labels.
 - LLM slow-path parser is guarded by `LLM_MAX_CONCURRENT_CALLS` and `LLM_ASSIST_QUEUE_WAIT_MS`, returning a safe parser rejection instead of allowing unbounded assist backlog.
 - Chatbot QA readiness gate exists under `src/tools/readinessGate.ts` and uses reviewed fixtures in `tools/chatbot-qa/fixtures/`.
+- Batch-safe Telegram handling replies with `[1/n]`, processes lines sequentially, and does not save ambiguous multi-match context from multi-question messages.
+- Lookup coaching questions such as “ควรค้นด้วยคำไหนต่อ” return profile-driven guidance and do not call SML/LLM for facts.
+- Result-quality guard rejects broad weak matches with `needs_refinement` and can be rolled back with `RESULT_QUALITY_MODE=warn` or `off`.
+- Metrics include `result_quality` on lookup metrics and `parts_lookup_batch_messages_total` with `batch_items`/`batch_outcome`.
+- Capability-gap classifier returns `capability_gap` for profile-declared requestable data needs such as cost/supplier/promotion/reserved stock/lot/lead time, does not call SML fact tools, and increments `parts_lookup_capability_gap_total`.
+- SML tool discovery can warn in `/ready` when suggested read-only MCP tools from Business Profile are missing, without using discovery to choose runtime tools automatically.
+- QA trace logging is feature-flagged, defaults to metadata-only/off, redacts secret-like values, and records structured decision trace without LLM chain-of-thought.
 
 Optional local Thai query evaluation gate:
 
@@ -138,6 +147,10 @@ Never call `create_sale_reserve` in standard smoke tests.
 - LINE group: normal chatter is ignored; @mention stock query gets a reply.
 - No match: bot asks for clearer ID/model/descriptor, not a fabricated answer.
 - Multiple match: bot asks user to choose among current-page candidates and supports `เพิ่ม` for the next page when more candidates exist.
+- Batch message: bot accepts up to `MAX_BATCH_ITEMS` clear newline-separated lookup/coaching questions and rejects context-only batch commands safely.
+- Search quality: broad weak results ask for refinement instead of showing unrelated candidates.
+- Capability gap: questions for data not exposed by configured read-only MCP return safe missing-capability guidance, not no-match, dependency error, or guessed facts.
+- Coaching: bot can explain how to ask lookup questions without fabricating facts.
 - Numeric follow-up: after multiple match, replying `1` chooses candidate 1 with the previous stock/price intent.
 - Intent follow-up: after a successful product lookup, replying `ราคา` or `สต็อก` uses the last product context.
 - Context follow-up: after asking about a product class, replying only a brand/model phrase inherits the previous stock/search intent if confidence is high.

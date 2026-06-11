@@ -108,6 +108,29 @@ const envSchema = z
         if (value == null || value === "") return true;
         return ["1", "true", "yes", "on"].includes(value.toLowerCase());
       }),
+    BATCH_LOOKUP_ENABLED: z
+      .string()
+      .optional()
+      .transform((value) => {
+        if (value == null || value === "") return true;
+        return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+      }),
+    MAX_BATCH_ITEMS: numberFromEnv(5),
+    MAX_BATCH_TEXT_CHARS: numberFromEnv(1200),
+    CAPABILITY_GAP_SHOW_TECHNICAL_HINT: booleanFromEnv,
+    QA_TRACE_ENABLED: booleanFromEnv,
+    QA_TRACE_INCLUDE_RAW_TEXT: booleanFromEnv,
+    QA_TRACE_INCLUDE_BOT_REPLY: booleanFromEnv,
+    QA_TRACE_MAX_TEXT_CHARS: numberFromEnv(1000),
+    QA_TRACE_REDACT_SECRETS: z
+      .string()
+      .optional()
+      .transform((value) => {
+        if (value == null || value === "") return true;
+        return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+      }),
+    QA_TRACE_SAMPLE_RATE: numberFromEnv(1),
+    QA_TRACE_TTL_DAYS: numberFromEnv(14),
     LINE_ENABLED: booleanFromEnv,
     LINE_CHANNEL_SECRET: z.string().optional(),
     LINE_CHANNEL_ACCESS_TOKEN: z.string().optional(),
@@ -124,6 +147,8 @@ const envSchema = z
     LLM_MIN_CONFIDENCE: numberFromEnv(0.75),
     LLM_MAX_CONCURRENT_CALLS: numberFromEnv(2),
     LLM_ASSIST_QUEUE_WAIT_MS: numberFromEnv(5000),
+    REFINEMENT_CACHE_TTL_SECONDS: numberFromEnv(60),
+    RESULT_QUALITY_MODE: z.enum(["off", "warn", "enforce"]).default("enforce"),
     TELEGRAM_CONTEXT_TTL_SECONDS: numberFromEnv(300),
     TELEGRAM_DEDUP_TTL_SECONDS: numberFromEnv(900),
     TELEGRAM_ENABLED: booleanFromEnv,
@@ -220,6 +245,48 @@ const envSchema = z
         code: "custom",
         path: ["ASSIST_STATUS_MIN_DELAY_MS"],
         message: "ASSIST_STATUS_MIN_DELAY_MS must be greater than or equal to 0"
+      });
+    }
+    if (env.MAX_BATCH_ITEMS < 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["MAX_BATCH_ITEMS"],
+        message: "MAX_BATCH_ITEMS must be greater than 0"
+      });
+    }
+    if (env.MAX_BATCH_TEXT_CHARS < 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["MAX_BATCH_TEXT_CHARS"],
+        message: "MAX_BATCH_TEXT_CHARS must be greater than 0"
+      });
+    }
+    if (env.REFINEMENT_CACHE_TTL_SECONDS < 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["REFINEMENT_CACHE_TTL_SECONDS"],
+        message: "REFINEMENT_CACHE_TTL_SECONDS must be greater than or equal to 0"
+      });
+    }
+    if (env.QA_TRACE_SAMPLE_RATE < 0 || env.QA_TRACE_SAMPLE_RATE > 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["QA_TRACE_SAMPLE_RATE"],
+        message: "QA_TRACE_SAMPLE_RATE must be between 0 and 1"
+      });
+    }
+    if (env.QA_TRACE_MAX_TEXT_CHARS < 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["QA_TRACE_MAX_TEXT_CHARS"],
+        message: "QA_TRACE_MAX_TEXT_CHARS must be greater than or equal to 0"
+      });
+    }
+    if (env.QA_TRACE_TTL_DAYS < 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["QA_TRACE_TTL_DAYS"],
+        message: "QA_TRACE_TTL_DAYS must be greater than or equal to 0"
       });
     }
   });

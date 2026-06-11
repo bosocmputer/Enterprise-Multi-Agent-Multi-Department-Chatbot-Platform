@@ -107,6 +107,30 @@ describe("understandLookupQuery", () => {
     expect(calls).toBe(0);
   });
 
+  it("classifies requestable capability gaps before deterministic lookup parsing", async () => {
+    let calls = 0;
+    const parser: LookupLlmParser = {
+      metadata: { model: "openrouter/openrouter/free", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => {
+        calls += 1;
+        return { reason: "provider_error", status: "rejected" };
+      }
+    };
+
+    await expect(
+      understandLookupQuery("PAINT-01424 ราคาทุนเท่าไหร่", profile, {
+        llmParser: parser,
+        llmParserMode: "assist"
+      })
+    ).resolves.toMatchObject({
+      capabilityId: "purchase_cost",
+      capabilityLabel: "ราคาทุน/ต้นทุน",
+      parserPath: "deterministic",
+      status: "capability_gap"
+    });
+    expect(calls).toBe(0);
+  });
+
   it("allows lookup-like natural questions to use LLM assist", async () => {
     let calls = 0;
     const parser: LookupLlmParser = {
@@ -137,6 +161,40 @@ describe("understandLookupQuery", () => {
       status: "parsed"
     });
     expect(calls).toBe(1);
+  });
+
+  it("accepts LLM assist capability-gap classification only from the profile enum", async () => {
+    const parser: LookupLlmParser = {
+      metadata: { model: "parts-lookup-parser-auto-2", provider: "litellm", timeoutMs: 6000 },
+      parse: async () => ({
+        capabilityGap: {
+          capabilityId: "supplier_lookup",
+          capabilityLabel: "ข้อมูลผู้จำหน่าย/supplier",
+          entityType: "inventory_item",
+          requiredFields: ["รหัสสินค้า หรือคำค้นสินค้า"],
+          source: "llm",
+          suggestedReadOnlyTool: "get_product_supplier"
+        },
+        confidence: 0.95,
+        intent: "unsupported",
+        keyword: "ใครเป็นต้นทางของรายการนี้",
+        query: "ใครเป็นต้นทางของรายการนี้",
+        searchTerms: ["ต้นทางของรายการนี้"],
+        status: "parsed"
+      })
+    };
+
+    await expect(
+      understandLookupQuery("ใครเป็นต้นทางของรายการนี้", profile, {
+        llmParser: parser,
+        llmParserMode: "assist"
+      })
+    ).resolves.toMatchObject({
+      assist: { status: "parsed" },
+      capabilityId: "supplier_lookup",
+      parserPath: "llm_assist",
+      status: "capability_gap"
+    });
   });
 
   it("falls back to unsupported when LLM is rejected", async () => {

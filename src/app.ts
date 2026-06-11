@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import { z } from "zod";
 import { LineAdapter } from "./channels/lineAdapter.js";
-import { loadBusinessProfile, type BusinessProfile } from "./config/businessProfile.js";
+import { loadBusinessProfile, suggestedReadOnlyMcpTools, type BusinessProfile } from "./config/businessProfile.js";
 import type { AppConfig } from "./config/env.js";
 import type { LookupLlmParser } from "./core/llmParser.js";
 import { runLlmParseWithTelemetry } from "./core/llmParser.js";
@@ -13,6 +13,7 @@ import { SmlClient } from "./integrations/smlClient.js";
 import type { AlertService } from "./observability/alertService.js";
 import { createLogger } from "./observability/logger.js";
 import { MetricsRegistry } from "./observability/metrics.js";
+import { logQaTrace, qaTraceConfigFromAppConfig } from "./observability/qaTrace.js";
 import { TelegramAdapter } from "./channels/telegramAdapter.js";
 import { requireInternalAuth } from "./security/internalAuth.js";
 import { MemoryCacheService } from "./services/cacheService.js";
@@ -53,6 +54,7 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
     }
   });
   const metrics = dependencies.metrics ?? new MetricsRegistry();
+  const qaTrace = qaTraceConfigFromAppConfig(config);
   const alerts = dependencies.alerts;
   const businessProfile = dependencies.businessProfile ?? loadBusinessProfile(config.BUSINESS_PROFILE_PATH);
   const llmParser = dependencies.llmParser ?? createLlmParser(config, businessProfile);
@@ -81,6 +83,8 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       llmParser,
       llmParserMode: config.LLM_PARSER_MODE,
       priceCacheTtlSeconds: config.PRICE_CACHE_TTL_SECONDS,
+      refinementCacheTtlSeconds: config.REFINEMENT_CACHE_TTL_SECONDS,
+      resultQualityMode: config.RESULT_QUALITY_MODE,
       searchCacheTtlSeconds: config.PRODUCT_SEARCH_CACHE_TTL_SECONDS,
       stockCacheTtlSeconds: config.STOCK_CACHE_TTL_SECONDS,
       tenantStatus
@@ -113,8 +117,19 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
 
   app.get("/ready", async (_request, reply) => {
     if (!requireInternalAuth(config, _request, reply)) return reply;
-    const [smlHealthy, stateReady] = await Promise.all([smlClient.health(), state.isReady()]);
+    const suggestedTools = suggestedReadOnlyMcpTools(businessProfile);
+    const toolDiscoveryClient = smlClient as SmlClient & { listTools?: () => Promise<string[]> };
+    const [smlHealthy, stateReady, discoveredTools] = await Promise.all([
+      smlClient.health(),
+      state.isReady(),
+      suggestedTools.length > 0 && typeof toolDiscoveryClient.listTools === "function"
+        ? toolDiscoveryClient.listTools().catch(() => undefined)
+        : Promise.resolve(undefined)
+    ]);
     const redisStatus = config.REDIS_URL ? (stateReady ? "ok" : "unavailable") : "not_configured";
+    const missingSuggestedMcpTools = discoveredTools
+      ? suggestedTools.filter((tool) => !discoveredTools.includes(tool))
+      : [];
     if (!smlHealthy || !stateReady) {
       await alerts?.send("readiness_degraded", `Readiness degraded: sml=${smlHealthy ? "ok" : "unavailable"} redis=${redisStatus}`);
       return reply.code(503).send({
@@ -122,12 +137,18 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
         dependencies: {
           sml: smlHealthy ? "ok" : "unavailable",
           redis: redisStatus
+        },
+        warnings: {
+          missingSuggestedMcpTools
         }
       });
     }
     return {
       status: "ok",
-      dependencies: { sml: "ok", redis: redisStatus }
+      dependencies: { sml: "ok", redis: redisStatus },
+      warnings: {
+        missingSuggestedMcpTools
+      }
     };
   });
 
@@ -145,17 +166,30 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
         });
       }
 
+      const lookupRequest = { ...parsed.data, channel: parsed.data.channel ?? "internal" };
       const result = await runLookupWithTelemetry(
         lookup,
-        { ...parsed.data, channel: parsed.data.channel ?? "internal" },
+        lookupRequest,
         { logger, metrics }
       );
+      const formattedReply = formatLookupReply(result, businessProfile, {
+        assistResultFooterEnabled: config.ASSIST_RESULT_FOOTER_ENABLED,
+        assistShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL,
+        capabilityGapShowTechnicalHint: config.CAPABILITY_GAP_SHOW_TECHNICAL_HINT
+      });
+      logQaTrace(logger, qaTrace, {
+        botReply: formattedReply,
+        businessType: businessProfile.businessType,
+        channel: lookupRequest.channel,
+        chatId: lookupRequest.chatId,
+        inputText: lookupRequest.text,
+        result,
+        tenantId: businessProfile.tenantId,
+        userId: lookupRequest.userId
+      });
       return {
         result,
-        reply: formatLookupReply(result, businessProfile, {
-          assistResultFooterEnabled: config.ASSIST_RESULT_FOOTER_ENABLED,
-          assistShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL
-        })
+        reply: formattedReply
       };
     });
 
@@ -200,6 +234,8 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       assistUserStatusEnabled: config.ASSIST_USER_STATUS_ENABLED,
       assistUserStatusShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL,
       businessProfile,
+      batchLookupEnabled: config.BATCH_LOOKUP_ENABLED,
+      capabilityGapShowTechnicalHint: config.CAPABILITY_GAP_SHOW_TECHNICAL_HINT,
       channelAccessToken: config.LINE_CHANNEL_ACCESS_TOKEN as string,
       channelSecret: config.LINE_CHANNEL_SECRET as string,
       contextStore: state,
@@ -210,7 +246,10 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       logger,
       llmParser,
       llmParserMode: config.LLM_PARSER_MODE,
+      maxBatchItems: config.MAX_BATCH_ITEMS,
+      maxBatchTextChars: config.MAX_BATCH_TEXT_CHARS,
       metrics,
+      qaTrace,
       rateLimiter: state,
       rateLimitPerMinute: config.RATE_LIMIT_PER_MINUTE
     });
@@ -230,11 +269,13 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
     const telegram = new TelegramAdapter({
       botToken: config.TELEGRAM_BOT_TOKEN as string,
       businessProfile,
+      batchLookupEnabled: config.BATCH_LOOKUP_ENABLED,
       alerts,
       assistResultFooterEnabled: config.ASSIST_RESULT_FOOTER_ENABLED,
       assistStatusMinDelayMs: config.ASSIST_STATUS_MIN_DELAY_MS,
       assistUserStatusEnabled: config.ASSIST_USER_STATUS_ENABLED,
       assistUserStatusShowModel: config.ASSIST_USER_STATUS_SHOW_MODEL,
+      capabilityGapShowTechnicalHint: config.CAPABILITY_GAP_SHOW_TECHNICAL_HINT,
       webhookSecret: config.TELEGRAM_WEBHOOK_SECRET as string,
       botUsername: config.TELEGRAM_BOT_USERNAME,
       contextStore: state,
@@ -244,7 +285,10 @@ export function createApp(config: AppConfig, dependencies: AppDependencies = {})
       logger,
       llmParser,
       llmParserMode: config.LLM_PARSER_MODE,
+      maxBatchItems: config.MAX_BATCH_ITEMS,
+      maxBatchTextChars: config.MAX_BATCH_TEXT_CHARS,
       metrics,
+      qaTrace,
       rateLimiter: state,
       rateLimitPerMinute: config.RATE_LIMIT_PER_MINUTE
     });

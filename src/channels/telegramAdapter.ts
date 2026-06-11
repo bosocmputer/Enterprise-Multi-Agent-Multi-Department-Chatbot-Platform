@@ -11,7 +11,9 @@ import { runLookupWithTelemetry } from "../core/lookupTelemetry.js";
 import { formatLookupReply } from "../core/responseFormatter.js";
 import type { LlmAssistStartEvent } from "../core/types.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
+import { logQaTrace, type QaTraceConfig, type QaTraceEvent } from "../observability/qaTrace.js";
 import type { CacheService, DedupStore, RateLimiter } from "../services/cacheService.js";
+import { planBatchLookup, prefixBatchReply, runBatchLookupItems } from "./batchLookup.js";
 
 const telegramMessageSchema = z.object({
   message_id: z.number(),
@@ -51,7 +53,9 @@ export interface TelegramAdapterOptions {
   assistUserStatusEnabled?: boolean;
   assistUserStatusShowModel?: boolean;
   botToken: string;
+  batchLookupEnabled?: boolean;
   businessProfile: BusinessProfile;
+  capabilityGapShowTechnicalHint?: boolean;
   alerts?: AlertSender;
   webhookSecret?: string;
   botUsername?: string;
@@ -63,7 +67,10 @@ export interface TelegramAdapterOptions {
   logger?: pino.Logger;
   llmParser?: LookupLlmParser;
   llmParserMode?: LlmParserMode;
+  maxBatchItems?: number;
+  maxBatchTextChars?: number;
   metrics?: MetricsRegistry;
+  qaTrace?: QaTraceConfig;
   rateLimiter?: RateLimiter;
   rateLimitPerMinute?: number;
 }
@@ -128,6 +135,76 @@ export class TelegramAdapter {
     const contextKey = this.contextKey(message);
     const chatId = String(message.chat.id);
     const assistStatus = this.createAssistStatusController(chatId, message.message_id);
+    const batchPlan = planBatchLookup(message.text, this.options.businessProfile, {
+      enabled: this.options.batchLookupEnabled,
+      maxItems: this.options.maxBatchItems,
+      maxTextChars: this.options.maxBatchTextChars
+    });
+    if (batchPlan.kind === "reply") {
+      await this.sendMessage(chatId, batchPlan.text, message.message_id);
+      this.recordQaTrace({
+        botReply: batchPlan.text,
+        chatId,
+        decision: { batchItems: batchPlan.itemCount, status: `batch_${batchPlan.outcome}` },
+        inputText: message.text,
+        userId: message.from?.id ? String(message.from.id) : undefined
+      });
+      this.options.metrics?.recordBatch("telegram", this.options.businessProfile.tenantId, batchPlan.itemCount, batchPlan.outcome);
+      this.options.metrics?.recordTelegramUpdate("handled", `batch_${batchPlan.outcome}`);
+      return { ignored: false, updateId: update.update_id };
+    }
+    if (batchPlan.kind === "batch") {
+      const batch = await runBatchLookupItems({
+        assistResultFooterEnabled: this.options.assistResultFooterEnabled,
+        assistShowModel: this.options.assistUserStatusShowModel,
+        capabilityGapShowTechnicalHint: this.options.capabilityGapShowTechnicalHint,
+        businessProfile: this.options.businessProfile,
+        channel: "telegram",
+        chatId,
+        items: batchPlan.items,
+        logger: this.options.logger,
+        lookup,
+        metrics: this.options.metrics,
+        onAssistStart: assistStatus.onAssistStart,
+        onResult: (result) => alertOnLookupDependencyError(this.options.alerts, "telegram", result),
+        userId: message.from?.id ? String(message.from.id) : undefined
+      });
+      await assistStatus.finish();
+      for (const [index, text] of batch.replies.entries()) {
+        await this.sendMessage(chatId, prefixBatchReply(index, batch.replies.length, text), message.message_id);
+      }
+      for (const [index, trace] of batch.traceItems.entries()) {
+        this.recordQaTrace({
+          botReply: prefixBatchReply(index, batch.traceItems.length, trace.botReply),
+          chatId,
+          decision: trace.decision,
+          inputText: trace.inputText,
+          metadata: trace.metadata,
+          result: trace.result,
+          userId: message.from?.id ? String(message.from.id) : undefined
+        });
+      }
+      this.options.metrics?.recordBatch(
+        "telegram",
+        this.options.businessProfile.tenantId,
+        batchPlan.items.length,
+        batch.outcomes.join("|").slice(0, 120) || "completed"
+      );
+      this.options.metrics?.recordTelegramUpdate("handled", "batch");
+      this.options.logger?.info(
+        {
+          batchItems: batchPlan.items.length,
+          channel: "telegram",
+          chatHash: hashIdentifier(chatId),
+          outcomes: batch.outcomes,
+          tenantId: this.options.businessProfile.tenantId,
+          textHash: hashText(message.text),
+          userHash: hashIdentifier(message.from?.id ? String(message.from.id) : undefined)
+        },
+        "telegram batch lookup completed"
+      );
+      return { ignored: false, updateId: update.update_id };
+    }
     const resolved = await resolveTextWithContext({
       businessProfile: this.options.businessProfile,
       contextStore: this.options.contextStore,
@@ -137,6 +214,13 @@ export class TelegramAdapter {
     });
     if (resolved.kind === "reply") {
       await this.sendMessage(String(message.chat.id), resolved.text, message.message_id);
+      this.recordQaTrace({
+        botReply: resolved.text,
+        chatId,
+        inputText: message.text,
+        metadata: resolved,
+        userId: message.from?.id ? String(message.from.id) : undefined
+      });
       this.options.metrics?.recordTelegramUpdate("handled", "context_reply");
       this.options.metrics?.recordConversationScope("telegram", this.options.businessProfile.tenantId, resolved);
       this.options.logger?.info(
@@ -179,14 +263,20 @@ export class TelegramAdapter {
       result,
       ttlSeconds: this.options.contextTtlSeconds ?? 300
     });
-    await this.sendMessage(
+    const formattedReply = formatLookupReply(result, this.options.businessProfile, {
+      assistResultFooterEnabled: this.options.assistResultFooterEnabled,
+      assistShowModel: this.options.assistUserStatusShowModel,
+      capabilityGapShowTechnicalHint: this.options.capabilityGapShowTechnicalHint
+    });
+    await this.sendMessage(chatId, formattedReply, message.message_id);
+    this.recordQaTrace({
+      botReply: formattedReply,
       chatId,
-      formatLookupReply(result, this.options.businessProfile, {
-        assistResultFooterEnabled: this.options.assistResultFooterEnabled,
-        assistShowModel: this.options.assistUserStatusShowModel
-      }),
-      message.message_id
-    );
+      inputText: message.text,
+      normalizedText: resolved.text,
+      result,
+      userId: message.from?.id ? String(message.from.id) : undefined
+    });
     await alertOnLookupDependencyError(this.options.alerts, "telegram", result);
     this.options.metrics?.recordTelegramUpdate("handled");
     return { ignored: false, updateId: update.update_id };
@@ -328,5 +418,14 @@ export class TelegramAdapter {
 
   private recordIgnored(reason: Extract<TelegramUpdateResult, { ignored: true }>["reason"]): void {
     this.options.metrics?.recordTelegramUpdate("ignored", reason);
+  }
+
+  private recordQaTrace(event: Omit<QaTraceEvent, "businessType" | "channel" | "tenantId">): void {
+    logQaTrace(this.options.logger, this.options.qaTrace, {
+      ...event,
+      businessType: this.options.businessProfile.businessType,
+      channel: "telegram",
+      tenantId: this.options.businessProfile.tenantId
+    });
   }
 }

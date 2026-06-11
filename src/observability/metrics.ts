@@ -70,12 +70,16 @@ export class MetricsRegistry {
       out_of_scope_category: result.outOfScopeCategory ?? "none",
       parser_path: parserPath(result),
       reply_policy: replyPolicy(result),
+      result_quality: resultQuality(result),
       source: "source" in result ? result.source ?? "unknown" : "unknown",
       status: result.status,
       tenant: "tenantId" in result ? result.tenantId ?? "unknown" : "unknown"
     };
     this.counter("parts_lookup_requests_total", "Lookup requests by channel and outcome.", labels);
     this.histogram("parts_lookup_duration_ms", "Lookup duration in milliseconds.", durationMs, labels);
+    if (result.status === "capability_gap") {
+      this.recordCapabilityGap(channel, result.tenantId ?? "unknown", result.capabilityId, result.entityType ?? "unknown");
+    }
   }
 
   recordTelegramUpdate(outcome: "handled" | "ignored" | "failed", reason = "none"): void {
@@ -98,6 +102,24 @@ export class MetricsRegistry {
       out_of_scope_category: metadata.outOfScopeCategory ?? "none",
       parser_path: metadata.parserPath ?? "none",
       reply_policy: metadata.replyPolicy ?? "lookup",
+      tenant
+    });
+  }
+
+  recordBatch(channel: string, tenant: string, itemCount: number, outcome: string): void {
+    this.counter("parts_lookup_batch_messages_total", "Batch messages by channel, item count, and outcome.", {
+      batch_outcome: outcome,
+      batch_items: itemCount,
+      channel,
+      tenant
+    });
+  }
+
+  recordCapabilityGap(channel: string, tenant: string, capability: string, entityType: string): void {
+    this.counter("parts_lookup_capability_gap_total", "Capability gaps requested by staff.", {
+      capability,
+      channel,
+      entity_type: entityType,
       tenant
     });
   }
@@ -210,9 +232,9 @@ function roundMetric(value: number): number {
 }
 
 function confidenceBand(result: LookupResult): "high" | "low" | "medium" | "none" {
+  if (result.status === "unsupported" || result.status === "dependency_error" || result.status === "capability_gap") return "none";
   if ("assist" in result && result.assist?.status === "parsed") return "medium";
   if ("assist" in result && result.assist?.status === "rejected") return "low";
-  if (result.status === "unsupported" || result.status === "dependency_error") return "none";
   return "high";
 }
 
@@ -229,4 +251,8 @@ function parserPath(result: LookupResult): string {
 
 function replyPolicy(result: LookupResult): string {
   return result.replyPolicy ?? (result.status === "unsupported" ? "help" : "lookup");
+}
+
+function resultQuality(result: LookupResult): string {
+  return "resultQuality" in result ? result.resultQuality ?? "not_checked" : "not_checked";
 }

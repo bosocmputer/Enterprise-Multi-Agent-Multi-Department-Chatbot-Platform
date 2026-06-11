@@ -134,7 +134,8 @@ no-match / ambiguous -> LiteLLM parse JSON -> validate -> retry SML -> reply
 
 - LiteLLM ไม่ตอบราคา ไม่ตอบสต็อก และไม่เลือกสินค้าตามใจเอง
 - ถ้า LLM timeout หรือ output ผิด ระบบจะ fallback อย่างปลอดภัย
-- ตอนนี้ model `openrouter/openrouter/free` latency ยังไม่นิ่ง บางครั้งเร็ว บางครั้งช้ามาก จึงมีข้อความแจ้ง user ว่ากำลังใช้ LiteLLM assist model
+- ตอนนี้แอปเรียก LiteLLM ผ่าน auto router เช่น `parts-lookup-parser-auto-2` เพื่อให้ LiteLLM เลือก provider/model ที่เหมาะสมจากฝั่ง proxy เอง
+- provider/model ที่อยู่หลัง router อาจมี latency ไม่นิ่ง โดยเฉพาะ tier ที่พึ่งพา free/shared model จึงมีข้อความแจ้ง user ว่ากำลังใช้ LiteLLM assist model
 
 ## Business Profile คืออะไร
 
@@ -166,15 +167,44 @@ Business Profile คือ config ของแต่ละธุรกิจ เ
 
 ## ข้อมูลจริงมาจากไหน
 
-ระบบคุยกับ SML MCP ผ่าน HTTP `/call`
+ระบบคุยกับ SML MCP ผ่าน HTTP `/call` โดยใช้เฉพาะ tool ที่ Business Profile/connector mapping อนุญาตไว้เท่านั้น
 
-ตอนนี้ใช้ read-only tools:
+ตอนนี้ข้อมูลจริงที่ตอบ user มาจาก read-only tools:
 
 - `search_product`
 - `get_stock_balance`
 - `get_product_price`
 
 ระบบห้ามเรียก write tool เช่น `create_sale_reserve` ใน flow นี้
+
+ระบบไม่ได้ดึงข้อมูลตรงจาก database/Postgres ของ SML และไม่ได้ให้ LiteLLM ตอบข้อมูลจริงแทน SML
+
+## Data Acquisition ปัจจุบัน
+
+| ข้อมูลที่ต้องใช้ | แหล่งข้อมูล | วิธีดึง | ใช้ตอบ user หรือไม่ |
+| --- | --- | --- | --- |
+| ข้อความจากพนักงาน | Telegram ตอนนี้, LINE ภายหลัง | polling/webhook adapter | ใช้เป็นคำถามเข้า flow |
+| คำพูด/ตัวอย่าง/alias ของแต่ละธุรกิจ | Business Profile | โหลดจาก config แล้ว validate | ใช้ตีความและจัดข้อความตอบ |
+| รายการสินค้า/รายการที่ค้นเจอ | SML MCP | `search_product` | ใช้แสดงตัวเลือก |
+| จำนวนคงเหลือ | SML MCP | `get_stock_balance` | ใช้ตอบ stock/availability |
+| ราคา | SML MCP | `get_product_price` | ใช้ตอบราคา |
+| context ล่าสุด เช่น เลือกข้อ 5 แล้วถามต่อ | Redis | session key ที่มี TTL | ใช้ตอบ follow-up |
+| การตีความคำถามกำกวม | LiteLLM | JSON parser ที่ validate แล้ว | ไม่ใช่ข้อมูลจริง ใช้แค่สร้างคำค้น |
+| QA/Analytics | logs, `/metrics`, readiness fixtures, transcript ที่ review แล้ว | metadata/hash | ใช้วิเคราะห์คุณภาพ ไม่ใช่ตอบ user |
+
+อ่านรายละเอียดเต็มได้ที่ `docs/data-acquisition.md`
+
+## Capability Gap คืออะไร
+
+ถ้า user ถามข้อมูลที่เป็นเรื่องงานร้าน แต่ระบบยังไม่มี read-only MCP ให้ดึง เช่น ราคาทุน, supplier, โปรโมชัน, ยอดจอง, lot/serial, lead time, ประวัติขาย หรือราคาตามลูกค้า ระบบจะไม่เดาและไม่เรียก tool ผิดประเภท
+
+ระบบจะตอบประมาณว่า:
+
+```text
+ข้อมูลนี้ยังไม่ได้เปิดให้บอทดึงจากระบบต้นทางครับ กรุณาแจ้งผู้ดูแล/ทีม SML เพิ่ม read-only MCP สำหรับข้อมูลชนิดนี้ เพื่อให้ดึงข้อมูลได้ถูกต้อง
+```
+
+ถ้าเปิด `CAPABILITY_GAP_SHOW_TECHNICAL_HINT=true` ระบบสามารถแสดงชื่อ suggested MCP ที่กำหนดไว้ใน Business Profile ได้ แต่ชื่อ tool ต้องมาจาก profile เท่านั้น ห้ามให้ AI สร้างเอง
 
 ## Redis ใช้ทำอะไร
 
@@ -196,7 +226,7 @@ Redis เป็น memory store สำหรับงานที่ต้อง
 
 เก็บ:
 
-- outcome เช่น success, multiple_matches, no_match, dependency_error
+- outcome เช่น success, multiple_matches, needs_refinement, no_match, capability_gap, dependency_error
 - parser path เช่น deterministic, llm_assist, none
 - latency
 - cache hit/miss
@@ -212,7 +242,9 @@ Redis เป็น memory store สำหรับงานที่ต้อง
 - raw chat id/user id
 - payload ใหญ่จาก SML หรือ provider
 
-หมายเหตุ: เพราะระบบไม่เก็บ raw text โดย default ถ้าอยากปรับจากคำถามจริง ควรให้ tester ส่ง transcript หรือ screenshot เฉพาะเคสที่ผิด/แปลกมาให้ review
+หมายเหตุ: ระบบไม่เก็บ raw text โดย default แต่ช่วง staff pilot สามารถเปิด `QA_TRACE_ENABLED=true` พร้อม `QA_TRACE_INCLUDE_RAW_TEXT=true` และ `QA_TRACE_INCLUDE_BOT_REPLY=true` เพื่อเก็บ transcript สำหรับ debug ได้ ควรเปิดแบบจำกัดเวลา ตั้ง retention/log rotation และให้ `QA_TRACE_REDACT_SECRETS=true` เสมอ
+
+QA trace จะเก็บ “decision trace” ของระบบ เช่น scope, parser path, action, keyword hash, outcome, LiteLLM model/outcome, SML/source metadata และ bot reply แต่จะไม่เก็บ chain-of-thought หรือ reasoning ภายในของ LLM
 
 ## สถานะ Deploy ปัจจุบัน
 
@@ -268,4 +300,3 @@ Redis เป็น memory store สำหรับงานที่ต้อง
 - มี Redis สำหรับ scale/dedup/cache/context
 - มี metrics/logs/alerts สำหรับ pilot
 - Deploy ด้วย Git commit และ Docker Compose ทำให้ rollback ได้
-

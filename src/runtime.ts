@@ -52,6 +52,8 @@ export function createRuntime(config: AppConfig): RuntimeServices {
     llmParser,
     llmParserMode: config.LLM_PARSER_MODE,
     priceCacheTtlSeconds: config.PRICE_CACHE_TTL_SECONDS,
+    refinementCacheTtlSeconds: config.REFINEMENT_CACHE_TTL_SECONDS,
+    resultQualityMode: config.RESULT_QUALITY_MODE,
     searchCacheTtlSeconds: config.PRODUCT_SEARCH_CACHE_TTL_SECONDS,
     stockCacheTtlSeconds: config.STOCK_CACHE_TTL_SECONDS,
     tenantStatus: businessProfile.sml.tenantStatus ?? config.SML_TENANT_STATUS

@@ -3,6 +3,7 @@ import type { BusinessProfile } from "../config/businessProfile.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
 import type { LlmParseResult, LlmParserMode, LookupLlmParser } from "./llmParser.js";
 import { llmParseOutcome, runLlmParseWithTelemetry } from "./llmParser.js";
+import { classifyCapabilityGapText } from "./capabilityClassifier.js";
 import {
   classifyNonLookupText,
   friendlyUnsupportedReason,
@@ -28,11 +29,27 @@ export async function understandLookupQuery(
   options: QueryUnderstandingOptions
 ): Promise<ParseOutcome> {
   const preParserNonLookup = classifyNonLookupText(text);
-  if (isOutOfScopeKind(preParserNonLookup)) {
+  if (
+    isOutOfScopeKind(preParserNonLookup) ||
+    preParserNonLookup === "lookup_coaching" ||
+    preParserNonLookup === "recommendation_guidance"
+  ) {
     return {
       status: "unsupported",
       reason: friendlyUnsupportedReason(preParserNonLookup),
       ...metadataForNonLookupKind(preParserNonLookup)
+    };
+  }
+
+  const capabilityGap = classifyCapabilityGapText(text, profile);
+  if (capabilityGap) {
+    return {
+      status: "capability_gap",
+      ...capabilityGap,
+      conversationScope: "lookup_like",
+      outOfScopeCategory: "none",
+      parserPath: "deterministic",
+      replyPolicy: "lookup"
     };
   }
 
@@ -63,6 +80,17 @@ export async function understandLookupQuery(
     mode: "assist"
   });
   const assist = assistInfo(assistStart, llmParsed);
+  if (llmParsed.status === "parsed" && llmParsed.capabilityGap) {
+    return {
+      status: "capability_gap",
+      ...llmParsed.capabilityGap,
+      assist,
+      conversationScope: "lookup_like",
+      outOfScopeCategory: "none",
+      parserPath: "llm_assist",
+      replyPolicy: "lookup"
+    };
+  }
   if (llmParsed.status !== "parsed" || llmParsed.intent === "unsupported") return { ...deterministic, assist };
   if (!profile.enabledIntents.includes(llmParsed.intent)) {
     return {
@@ -125,7 +153,7 @@ export function assistInfo(started: LlmAssistStartEvent, result: LlmParseResult)
     outcome: result.outcome ?? llmParseOutcome(result),
     provider: started.provider,
     reason: started.reason,
-    status: result.status === "parsed" && result.intent !== "unsupported" ? "parsed" : "rejected",
+    status: result.status === "parsed" && (result.intent !== "unsupported" || Boolean(result.capabilityGap)) ? "parsed" : "rejected",
     timeoutMs: started.timeoutMs
   };
 }

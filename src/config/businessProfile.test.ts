@@ -3,7 +3,8 @@ import {
   businessProfileSchema,
   formatBusinessProfileHelp,
   loadBusinessProfile,
-  normalizeDomainProfile
+  normalizeDomainProfile,
+  suggestedReadOnlyMcpTools
 } from "./businessProfile.js";
 
 describe("business profile", () => {
@@ -39,6 +40,12 @@ describe("business profile", () => {
       ]
     });
     expect(domain.connectors.flatMap((connector) => connector.allowedTools)).not.toContain("create_sale_reserve");
+    expect(profile.capabilities.requestable.map((capability) => capability.id)).toEqual(
+      expect.arrayContaining(["purchase_cost", "supplier_lookup", "reserved_stock"])
+    );
+    expect(suggestedReadOnlyMcpTools(profile)).toEqual(
+      expect.arrayContaining(["get_product_cost", "get_product_supplier"])
+    );
   });
 
   it("loads the mock auto-parts profile without changing source contracts", () => {
@@ -82,6 +89,25 @@ describe("business profile", () => {
           }
         ],
         entities: [{ label: "Entry", type: "entry" }]
+      },
+      tenantId: "test"
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("rejects write-like suggested MCP tools in requestable capabilities", () => {
+    const parsed = businessProfileSchema.safeParse({
+      businessType: "test",
+      capabilities: {
+        requestable: [
+          {
+            id: "reservation",
+            label: "จองสินค้า",
+            phrases: ["จอง"],
+            suggestedReadOnlyTool: "create_sale_reserve"
+          }
+        ]
       },
       tenantId: "test"
     });

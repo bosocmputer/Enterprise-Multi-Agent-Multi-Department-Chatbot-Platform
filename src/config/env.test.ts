@@ -93,4 +93,25 @@ describe("loadConfig alert settings", () => {
       /LLM_ASSIST_QUEUE_WAIT_MS must be greater than or equal to 0/
     );
   });
+
+  it("defaults QA trace to safe metadata-only logging", () => {
+    const config = loadConfig({});
+
+    expect(config.QA_TRACE_ENABLED).toBe(false);
+    expect(config.QA_TRACE_INCLUDE_RAW_TEXT).toBe(false);
+    expect(config.QA_TRACE_INCLUDE_BOT_REPLY).toBe(false);
+    expect(config.QA_TRACE_REDACT_SECRETS).toBe(true);
+    expect(config.QA_TRACE_SAMPLE_RATE).toBe(1);
+    expect(config.QA_TRACE_TTL_DAYS).toBe(14);
+  });
+
+  it("rejects invalid QA trace bounds", () => {
+    expect(() => loadConfig({ QA_TRACE_SAMPLE_RATE: "1.5" })).toThrow(/QA_TRACE_SAMPLE_RATE must be between 0 and 1/);
+    expect(() => loadConfig({ QA_TRACE_MAX_TEXT_CHARS: "-1" })).toThrow(
+      /QA_TRACE_MAX_TEXT_CHARS must be greater than or equal to 0/
+    );
+    expect(() => loadConfig({ QA_TRACE_TTL_DAYS: "-1" })).toThrow(
+      /QA_TRACE_TTL_DAYS must be greater than or equal to 0/
+    );
+  });
 });

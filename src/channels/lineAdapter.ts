@@ -11,7 +11,9 @@ import { runLookupWithTelemetry } from "../core/lookupTelemetry.js";
 import { formatLookupReply } from "../core/responseFormatter.js";
 import type { LlmAssistStartEvent } from "../core/types.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
+import { logQaTrace, type QaTraceConfig, type QaTraceEvent } from "../observability/qaTrace.js";
 import type { CacheService, DedupStore, RateLimiter } from "../services/cacheService.js";
+import { planBatchLookup, prefixBatchReply, runBatchLookupItems } from "./batchLookup.js";
 
 const lineEventSchema = z
   .object({
@@ -64,7 +66,9 @@ export interface LineAdapterOptions {
   assistStatusMinDelayMs?: number;
   assistUserStatusEnabled?: boolean;
   assistUserStatusShowModel?: boolean;
+  batchLookupEnabled?: boolean;
   businessProfile: BusinessProfile;
+  capabilityGapShowTechnicalHint?: boolean;
   channelAccessToken: string;
   channelSecret: string;
   contextStore?: CacheService;
@@ -76,7 +80,10 @@ export interface LineAdapterOptions {
   logger?: pino.Logger;
   llmParser?: LookupLlmParser;
   llmParserMode?: LlmParserMode;
+  maxBatchItems?: number;
+  maxBatchTextChars?: number;
   metrics?: MetricsRegistry;
+  qaTrace?: QaTraceConfig;
   rateLimiter?: RateLimiter;
   rateLimitPerMinute?: number;
 }
@@ -153,6 +160,77 @@ export class LineAdapter {
 
     const contextKey = `line:context:${chatId}:${userId}`;
     const assistStatus = this.createAssistStatusController(event);
+    const batchPlan = planBatchLookup(gatedText, this.options.businessProfile, {
+      enabled: this.options.batchLookupEnabled,
+      maxItems: this.options.maxBatchItems,
+      maxTextChars: this.options.maxBatchTextChars
+    });
+    if (batchPlan.kind === "reply") {
+      await this.reply(event.replyToken, batchPlan.text);
+      this.recordQaTrace({
+        botReply: batchPlan.text,
+        chatId,
+        decision: { batchItems: batchPlan.itemCount, status: `batch_${batchPlan.outcome}` },
+        inputText: gatedText,
+        userId
+      });
+      this.options.metrics?.recordBatch("line", this.options.businessProfile.tenantId, batchPlan.itemCount, batchPlan.outcome);
+      this.options.metrics?.recordChannelUpdate("line", "handled", `batch_${batchPlan.outcome}`);
+      return true;
+    }
+    if (batchPlan.kind === "batch") {
+      const batch = await runBatchLookupItems({
+        assistResultFooterEnabled: this.options.assistResultFooterEnabled,
+        assistShowModel: this.options.assistUserStatusShowModel,
+        capabilityGapShowTechnicalHint: this.options.capabilityGapShowTechnicalHint,
+        businessProfile: this.options.businessProfile,
+        channel: "line",
+        chatId,
+        items: batchPlan.items,
+        logger: this.options.logger,
+        lookup,
+        metrics: this.options.metrics,
+        onAssistStart: assistStatus.onAssistStart,
+        onResult: (result) => alertOnLookupDependencyError(this.options.alerts, "line", result),
+        userId
+      });
+      await assistStatus.finish();
+      await this.reply(
+        event.replyToken,
+        batch.replies.map((text, index) => prefixBatchReply(index, batch.replies.length, text)).join("\n\n")
+      );
+      for (const [index, trace] of batch.traceItems.entries()) {
+        this.recordQaTrace({
+          botReply: prefixBatchReply(index, batch.traceItems.length, trace.botReply),
+          chatId,
+          decision: trace.decision,
+          inputText: trace.inputText,
+          metadata: trace.metadata,
+          result: trace.result,
+          userId
+        });
+      }
+      this.options.metrics?.recordBatch(
+        "line",
+        this.options.businessProfile.tenantId,
+        batchPlan.items.length,
+        batch.outcomes.join("|").slice(0, 120) || "completed"
+      );
+      this.options.metrics?.recordChannelUpdate("line", "handled", "batch");
+      this.options.logger?.info(
+        {
+          batchItems: batchPlan.items.length,
+          channel: "line",
+          chatHash: hashIdentifier(chatId),
+          outcomes: batch.outcomes,
+          tenantId: this.options.businessProfile.tenantId,
+          textHash: hashText(gatedText),
+          userHash: hashIdentifier(userId)
+        },
+        "line batch lookup completed"
+      );
+      return true;
+    }
     const resolved = await resolveTextWithContext({
       businessProfile: this.options.businessProfile,
       contextStore: this.options.contextStore,
@@ -162,6 +240,13 @@ export class LineAdapter {
     });
     if (resolved.kind === "reply") {
       await this.reply(event.replyToken, resolved.text);
+      this.recordQaTrace({
+        botReply: resolved.text,
+        chatId,
+        inputText: gatedText,
+        metadata: resolved,
+        userId
+      });
       this.options.metrics?.recordChannelUpdate("line", "handled", "context_reply");
       this.options.metrics?.recordConversationScope("line", this.options.businessProfile.tenantId, resolved);
       this.options.logger?.info(
@@ -199,13 +284,20 @@ export class LineAdapter {
       result,
       ttlSeconds: this.options.contextTtlSeconds ?? 300
     });
-    await this.reply(
-      event.replyToken,
-      formatLookupReply(result, this.options.businessProfile, {
-        assistResultFooterEnabled: this.options.assistResultFooterEnabled,
-        assistShowModel: this.options.assistUserStatusShowModel
-      })
-    );
+    const formattedReply = formatLookupReply(result, this.options.businessProfile, {
+      assistResultFooterEnabled: this.options.assistResultFooterEnabled,
+      assistShowModel: this.options.assistUserStatusShowModel,
+      capabilityGapShowTechnicalHint: this.options.capabilityGapShowTechnicalHint
+    });
+    await this.reply(event.replyToken, formattedReply);
+    this.recordQaTrace({
+      botReply: formattedReply,
+      chatId,
+      inputText: gatedText,
+      normalizedText: resolved.text,
+      result,
+      userId
+    });
     await alertOnLookupDependencyError(this.options.alerts, "line", result);
     this.options.metrics?.recordChannelUpdate("line", "handled");
     return true;
@@ -295,6 +387,15 @@ export class LineAdapter {
     if (!response.ok) {
       this.options.logger?.warn({ status: response.status }, "LINE loading animation HTTP failure");
     }
+  }
+
+  private recordQaTrace(event: Omit<QaTraceEvent, "businessType" | "channel" | "tenantId">): void {
+    logQaTrace(this.options.logger, this.options.qaTrace, {
+      ...event,
+      businessType: this.options.businessProfile.businessType,
+      channel: "line",
+      tenantId: this.options.businessProfile.tenantId
+    });
   }
 }
 

@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { loadBusinessProfile } from "../config/businessProfile.js";
+import { planBatchLookup } from "../channels/batchLookup.js";
 import { resolveTextWithContext, saveLookupContext } from "../channels/chatContext.js";
 import { MemoryCacheService } from "../services/cacheService.js";
 import type { LookupResult } from "../core/types.js";
@@ -22,7 +23,19 @@ const expectationSchema = z.object({
 const turnSchema = z.object({
   expected: expectationSchema.default({ replyIncludes: [], replyNotIncludes: [], statusIn: [] }),
   id: z.string().min(1),
-  metricClass: z.enum(["context", "fast_path", "friendly", "guardrail", "help", "llm_assist", "out_of_scope", "sml_lookup"]),
+  metricClass: z.enum([
+    "batch",
+    "coaching",
+    "context",
+    "fast_path",
+    "friendly",
+    "guardrail",
+    "help",
+    "llm_assist",
+    "out_of_scope",
+    "refinement",
+    "sml_lookup"
+  ]),
   requiresLlm: z.boolean().default(false),
   text: z.string().min(1)
 });
@@ -296,6 +309,37 @@ async function runSingleScenario(options: {
   for (const turn of options.scenario.turns) {
     const startedAt = Date.now();
     try {
+      const batchPlan = planBatchLookup(turn.text, options.profile, {
+        enabled: true,
+        maxItems: 5,
+        maxTextChars: 1200
+      });
+      if (batchPlan.kind !== "single") {
+        records.push(
+          buildRecord({
+            category: options.scenario.category,
+            chatId: options.chatId,
+            expected: turn.expected,
+            includeText: options.includeText,
+            level: options.level,
+            metricClass: turn.metricClass,
+            ms: Date.now() - startedAt,
+            observed: {
+              parserPath: "none",
+              path: "channel_context",
+              policy: batchPlan.kind === "batch" ? "lookup" : "help",
+              reply: batchPlan.kind === "batch" ? batchPlan.items.map((item, index) => `[${index + 1}/${batchPlan.items.length}] ${item}`).join("\n") : batchPlan.text,
+              scope: "lookup_like",
+              source: "none",
+              status: batchPlan.kind === "batch" ? "batch" : "reply"
+            },
+            scenarioId: options.scenario.id,
+            turn
+          })
+        );
+        continue;
+      }
+
       const resolved = await resolveTextWithContext({
         businessProfile: options.profile,
         contextStore: store,

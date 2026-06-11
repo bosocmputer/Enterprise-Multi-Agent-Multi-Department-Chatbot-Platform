@@ -11,13 +11,15 @@
 | SML integration | Custom client over `/call` | SML internal endpoint | Keeps scope small and read-only. |
 | Cache/session/dedup | Redis | - | Low-latency cache, locks, rate limits, session context. |
 | Business Profile / Domain Profile v2 | JSON/Zod schema first, database/profile service later | - | Keeps tenant entities, actions, connector mappings, vocabulary, examples, aliases, and reply style out of source code. |
+| LLM parser gateway | LiteLLM OpenAI-compatible API | `https://docs.litellm.ai/docs/` | Optional assist parser behind a router model; provider-swappable and never a source of lookup facts. |
 | Background jobs | BullMQ | `https://github.com/taskforcesh/bullmq` | Redis-backed jobs for slow/background work only. |
 | Runtime schemas | Zod | `https://github.com/colinhacks/zod` | Validate env, channel payloads, SML parsed responses, and internal job payloads. |
 | Env validation | envalid or Zod-based env module | `https://github.com/af/envalid` | Fail fast when required config is missing. |
-| Logging | Pino | `https://github.com/pinojs/pino` | Structured JSON logs with redaction and high throughput. |
+| Logging / QA trace | Pino | `https://github.com/pinojs/pino` | Structured JSON logs with redaction, plus feature-flagged staff-pilot transcript/decision trace. |
 | Tracing/metrics | OpenTelemetry JS | `https://github.com/open-telemetry/opentelemetry-js` | Standard traces/metrics across webhook, cache, SML, and replies. |
 | Circuit breaker | opossum or small local wrapper | `https://github.com/nodeshift/opossum` | Fail fast around SML if repeated failures occur. |
 | Thai query evaluation | PyThaiNLP core package | `https://pythainlp.org/docs/5.3.4/` | Offline analysis of reviewed Thai no-match/unsupported examples; not installed in the app runtime image. |
+| QA analytics source | App `/metrics`, structured logs, readiness fixtures | - | Measures staff-test quality without connecting a warehouse/BI source yet. |
 
 ## Optional Later
 

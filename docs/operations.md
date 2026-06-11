@@ -27,6 +27,7 @@ Expose at least:
 | `parts_lookup_llm_parse_total{mode,outcome,model}` | LLM parser quality, rejection rate, and shadow/assist activity. |
 | `parts_lookup_llm_parse_duration_ms{model,outcome}` | LLM parser latency and timeout risk. |
 | `parts_lookup_llm_assist_started_total{mode,model,reason}` | User-visible assist slow-path starts by model and trigger reason. |
+| `parts_lookup_capability_gap_total{tenant,channel,capability}` | Business-relevant questions that need a new approved read-only source capability. |
 | `reply_errors_total{channel}` | Channel delivery issues. |
 | `dedup_hits_total{channel}` | Duplicate webhook events. |
 | `rate_limited_total{channel}` | Abuse or noisy group behavior. |
@@ -58,6 +59,7 @@ The script reads the alert bot token from `.env`, finds the latest Telegram chat
 | No-match spike | no-match rate doubles baseline for 15 minutes. |
 | LLM parser rejected/timeout spike | parser rejection or timeout rate rises after enabling shadow/assist. |
 | LLM queue timeout spike | `rejected_queue_timeout` appears repeatedly, meaning assist traffic exceeds the configured concurrency/queue budget. |
+| Capability gap spike | requestable missing-data questions increase, meaning staff need a new read-only MCP/source capability or clearer workflow guidance. |
 
 ## Runbook: SML Port Not Reachable
 
@@ -144,6 +146,58 @@ python tools/thai-query-eval/thai_query_eval.py \
 7. Keep LiteLLM in `assist` only when parser timeout/rejection metrics are healthy; otherwise roll back to `shadow` or `off`.
 
 The PyThaiNLP tool must use reviewed/redacted input only. It rejects chat IDs, user IDs, tokens, secrets, auth headers, raw provider payloads, and secret-like values.
+
+## Runbook: Staff QA Trace
+
+Use QA trace only during controlled staff testing when raw transcript is needed to diagnose real wording and reply UX.
+
+Enable on the server:
+
+```bash
+cd /home/bosscatdog/parts-lookup-chatbot
+perl -0pi -e 's/^QA_TRACE_ENABLED=.*/QA_TRACE_ENABLED=true/m; s/^QA_TRACE_INCLUDE_RAW_TEXT=.*/QA_TRACE_INCLUDE_RAW_TEXT=true/m; s/^QA_TRACE_INCLUDE_BOT_REPLY=.*/QA_TRACE_INCLUDE_BOT_REPLY=true/m; s/^QA_TRACE_REDACT_SECRETS=.*/QA_TRACE_REDACT_SECRETS=true/m' .env
+docker compose up -d --force-recreate parts-lookup-api
+```
+
+Watch trace logs:
+
+```bash
+docker logs -f parts-lookup-api | grep 'qa trace'
+```
+
+Disable raw capture after pilot:
+
+```bash
+perl -0pi -e 's/^QA_TRACE_INCLUDE_RAW_TEXT=.*/QA_TRACE_INCLUDE_RAW_TEXT=false/m; s/^QA_TRACE_INCLUDE_BOT_REPLY=.*/QA_TRACE_INCLUDE_BOT_REPLY=false/m' .env
+docker compose up -d --force-recreate parts-lookup-api
+```
+
+Rules:
+
+- Keep `QA_TRACE_REDACT_SECRETS=true`.
+- Do not paste raw QA logs into public channels or commit them.
+- Use raw text to create reviewed fixtures/profile aliases, then turn raw capture back off.
+- `QA_TRACE_TTL_DAYS` is log metadata only; configure Docker/server log retention separately.
+- QA trace stores structured decision metadata, not chain-of-thought.
+
+## Runbook: Capability Gap Or Missing MCP
+
+Symptoms:
+
+- Staff asks for cost, supplier, promotion, reserved stock, lot/serial, lead time, sales history, customer-specific price, or another profile-declared requestable capability.
+- Bot replies that the data is not yet opened for retrieval from the source system.
+- `parts_lookup_capability_gap_total` increases.
+- Authenticated `/ready` may include warnings for suggested MCP tools that are not present in SML `/tools`.
+
+Actions:
+
+1. Confirm the question is not a normal no-match, broad search, SML timeout, or user-error case.
+2. Check Business Profile `capabilities.requestable` for the capability label and suggested read-only MCP name.
+3. Ask SML/source-system team whether a read-only MCP already exists or should be added.
+4. If SML adds the tool, update Business Profile connector/capability mapping and SML client schemas/tests before calling it.
+5. Keep write-like tools, including create/update/delete/reserve flows, blocked until explicitly approved and sandbox-tested.
+
+Do not let LLM output create new tool names or choose arbitrary MCP tools. Runtime tool names must come from profile and local allowlists only.
 
 ## Runbook: LiteLLM Parser Degraded
 
