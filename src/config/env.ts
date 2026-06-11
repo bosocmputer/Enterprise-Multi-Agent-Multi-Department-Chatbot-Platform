@@ -122,6 +122,8 @@ const envSchema = z
     OPENAI_BASE_URL: optionalUrlFromEnv,
     LLM_PARSER_TIMEOUT_MS: numberFromEnv(6000),
     LLM_MIN_CONFIDENCE: numberFromEnv(0.75),
+    LLM_MAX_CONCURRENT_CALLS: numberFromEnv(2),
+    LLM_ASSIST_QUEUE_WAIT_MS: numberFromEnv(5000),
     TELEGRAM_CONTEXT_TTL_SECONDS: numberFromEnv(300),
     TELEGRAM_DEDUP_TTL_SECONDS: numberFromEnv(900),
     TELEGRAM_ENABLED: booleanFromEnv,
@@ -197,6 +199,20 @@ const envSchema = z
         code: "custom",
         path: ["LLM_PARSER_TIMEOUT_MS"],
         message: "LLM_PARSER_TIMEOUT_MS must be greater than 0"
+      });
+    }
+    if (env.LLM_MAX_CONCURRENT_CALLS <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["LLM_MAX_CONCURRENT_CALLS"],
+        message: "LLM_MAX_CONCURRENT_CALLS must be greater than 0"
+      });
+    }
+    if (env.LLM_ASSIST_QUEUE_WAIT_MS < 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["LLM_ASSIST_QUEUE_WAIT_MS"],
+        message: "LLM_ASSIST_QUEUE_WAIT_MS must be greater than or equal to 0"
       });
     }
     if (env.ASSIST_STATUS_MIN_DELAY_MS < 0) {

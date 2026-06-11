@@ -1,0 +1,11 @@
+{"sessionId":"qa-help","turn":1,"actor":"user","text":"สวัสดีครับ","expectedScope":"friendly","expectedPolicy":"friendly","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-help","turn":2,"actor":"bot","summary":"Friendly help-lite reply; no source lookup","expectedSource":"none","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-exact","turn":1,"actor":"user","text":"PAINT-01424 ราคา","expectedScope":"lookup_like","expectedParserPath":"deterministic","expectedStatus":"success","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-exact","turn":2,"actor":"bot","summary":"Exact id price reply from SML","expectedSource":"sml","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-context","turn":1,"actor":"user","text":"น้ำมัน ราคา","expectedStatus":"multiple_matches","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-context","turn":2,"actor":"user","text":"เพิ่ม","expectedPath":"channel_context","expectedSource":"none","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-context","turn":3,"actor":"user","text":"5","expectedStatus":"success","expectedSource":"sml","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-context","turn":4,"actor":"user","text":"ตัวนี้ราคาเท่าไหร่","expectedStatus":"success","expectedParserPath":"deterministic","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-safety","turn":1,"actor":"user","text":"อากาศวันนี้เป็นยังไง","expectedScope":"out_of_scope_current_info","expectedSource":"none","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-safety","turn":2,"actor":"user","text":"กินอะไรดี","expectedScope":"out_of_scope_general","expectedSource":"none","source":"reviewed_manual_fixture"}
+{"sessionId":"qa-assist","turn":1,"actor":"user","text":"ปูนตราช้าง","expectedParserPath":"llm_assist","expectedStatus":"no_match_or_unsupported","source":"reviewed_manual_fixture"}

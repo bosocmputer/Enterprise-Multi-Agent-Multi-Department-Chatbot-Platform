@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadBusinessProfile } from "../config/businessProfile.js";
 import { LiteLlmClientError, type LiteLlmClient } from "../integrations/litellmClient.js";
-import { BusinessProfileLlmParser, runLlmParseWithTelemetry } from "./llmParser.js";
+import { BusinessProfileLlmParser, ThrottledLlmParser, runLlmParseWithTelemetry } from "./llmParser.js";
 import { MetricsRegistry } from "../observability/metrics.js";
 
 const profile = loadBusinessProfile("profiles/construction-demo.json");
@@ -239,5 +239,93 @@ describe("BusinessProfileLlmParser", () => {
       status: "rejected"
     });
     expect(metrics.renderPrometheus()).toContain('outcome="rejected_provider_error"');
+  });
+
+  it("rejects LLM calls that wait beyond the configured queue budget", async () => {
+    let releaseFirstCall: (() => void) | undefined;
+    const parser = new ThrottledLlmParser({
+      maxConcurrentCalls: 1,
+      parser: {
+        metadata: {
+          model: "openrouter/openrouter/free",
+          provider: "litellm",
+          timeoutMs: 6000
+        },
+        parse: async () =>
+          new Promise((resolve) => {
+            releaseFirstCall = () =>
+              resolve({
+                confidence: 0.95,
+                intent: "stock",
+                keyword: "ปูน",
+                query: "ปูน",
+                searchTerms: ["ปูน"],
+                status: "parsed"
+              });
+          })
+      },
+      queueWaitMs: 1
+    });
+
+    const first = parser.parse("มีปูนไหม");
+    await expect(parser.parse("มีปูนอีกไหม")).resolves.toMatchObject({
+      reason: "queue_timeout",
+      status: "rejected"
+    });
+    releaseFirstCall?.();
+    await expect(first).resolves.toMatchObject({ status: "parsed" });
+  });
+
+  it("queues LLM calls when a slot opens before the queue budget expires", async () => {
+    let releaseFirstCall: (() => void) | undefined;
+    let callCount = 0;
+    const parser = new ThrottledLlmParser({
+      maxConcurrentCalls: 1,
+      parser: {
+        metadata: {
+          model: "openrouter/openrouter/free",
+          provider: "litellm",
+          timeoutMs: 6000
+        },
+        parse: async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            return new Promise((resolve) => {
+              releaseFirstCall = () =>
+                resolve({
+                  confidence: 0.95,
+                  intent: "stock",
+                  keyword: "ปูน",
+                  query: "ปูน",
+                  searchTerms: ["ปูน"],
+                  status: "parsed"
+                });
+            });
+          }
+          return {
+            confidence: 0.96,
+            intent: "price",
+            keyword: "น้ำมัน",
+            query: "น้ำมัน",
+            searchTerms: ["น้ำมัน"],
+            status: "parsed"
+          };
+        }
+      },
+      queueWaitMs: 100
+    });
+
+    const first = parser.parse("มีปูนไหม");
+    await Promise.resolve();
+    const second = parser.parse("น้ำมัน ราคา");
+    await Promise.resolve();
+    releaseFirstCall?.();
+
+    await expect(first).resolves.toMatchObject({ status: "parsed" });
+    await expect(second).resolves.toMatchObject({
+      intent: "price",
+      keyword: "น้ำมัน",
+      status: "parsed"
+    });
   });
 });

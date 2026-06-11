@@ -57,6 +57,7 @@ The script reads the alert bot token from `.env`, finds the latest Telegram chat
 | Redis unavailable | any sustained Redis connection failure > 1 minute. |
 | No-match spike | no-match rate doubles baseline for 15 minutes. |
 | LLM parser rejected/timeout spike | parser rejection or timeout rate rises after enabling shadow/assist. |
+| LLM queue timeout spike | `rejected_queue_timeout` appears repeatedly, meaning assist traffic exceeds the configured concurrency/queue budget. |
 
 ## Runbook: SML Port Not Reachable
 
@@ -158,6 +159,7 @@ Behavior:
 - In `assist` mode, rejected parser output falls back to deterministic unsupported/no-match behavior and can show the configured safe failure copy to the user.
 - In Telegram, assist slow-path may send a typing action plus one status message after `ASSIST_STATUS_MIN_DELAY_MS`.
 - In LINE one-on-one chats, assist slow-path can start the official loading animation; group/room chats do not receive loading animation.
+- LiteLLM calls are capped by `LLM_MAX_CONCURRENT_CALLS`; calls waiting beyond `LLM_ASSIST_QUEUE_WAIT_MS` fail closed as `rejected_queue_timeout`.
 - Never use LLM content as stock or price truth.
 - If the user-facing assist status is noisy during pilot traffic, set `ASSIST_USER_STATUS_ENABLED=false` and recreate the app container without changing code.
 
@@ -208,6 +210,23 @@ BASE_URL=http://127.0.0.1:3060 INTERNAL_API_TOKEN=<token> bash scripts/prod-smok
 ```
 
 The `/health` payload includes `gitSha` so operators can confirm which commit is running.
+
+## Chatbot QA Readiness Gate
+
+Before adding staff testers beyond the dev account, run:
+
+```bash
+cd /home/bosscatdog/parts-lookup-chatbot
+BASE_URL=http://127.0.0.1:3060 INTERNAL_API_TOKEN=<token> npm run qa:readiness -- --summary-only
+```
+
+Before inviting a larger Telegram pilot group, include the slower model path:
+
+```bash
+BASE_URL=http://127.0.0.1:3060 INTERNAL_API_TOKEN=<token> npm run qa:readiness -- --include-llm --summary-only
+```
+
+Readiness uses the project semantic layer in `docs/chatbot-qa-semantic-layer.md` and reviewed fixtures under `tools/chatbot-qa/fixtures/`. Reports omit raw QA text by default and use text hashes for review.
 
 ## Production Demo Smoke Command
 

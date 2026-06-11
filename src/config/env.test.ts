@@ -75,11 +75,22 @@ describe("loadConfig alert settings", () => {
     expect(config.ASSIST_RESULT_FOOTER_ENABLED).toBe(true);
     expect(config.ASSIST_STATUS_MIN_DELAY_MS).toBe(800);
     expect(config.LLM_PARSER_TIMEOUT_MS).toBe(6000);
+    expect(config.LLM_MAX_CONCURRENT_CALLS).toBe(2);
+    expect(config.LLM_ASSIST_QUEUE_WAIT_MS).toBe(5000);
   });
 
   it("rejects negative assist status delay", () => {
     expect(() => loadConfig({ ASSIST_STATUS_MIN_DELAY_MS: "-1" })).toThrow(
       /ASSIST_STATUS_MIN_DELAY_MS must be greater than or equal to 0/
+    );
+  });
+
+  it("rejects invalid LLM slow-path guard settings", () => {
+    expect(() => loadConfig({ LLM_MAX_CONCURRENT_CALLS: "0" })).toThrow(
+      /LLM_MAX_CONCURRENT_CALLS must be greater than 0/
+    );
+    expect(() => loadConfig({ LLM_ASSIST_QUEUE_WAIT_MS: "-1" })).toThrow(
+      /LLM_ASSIST_QUEUE_WAIT_MS must be greater than or equal to 0/
     );
   });
 });

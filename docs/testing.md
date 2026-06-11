@@ -10,6 +10,7 @@ npm run build
 curl -fsS http://localhost:<port>/health
 curl -fsS -H "Authorization: Bearer <token>" http://localhost:<port>/ready
 BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-smoke.sh
+BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> npm run qa:readiness
 ```
 
 ## Unit Tests
@@ -18,7 +19,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 | --- | --- |
 | Business Profile | schema validation, missing profile, disabled intent, Domain Profile v2 normalization, required entity/action/read-only connector mapping, read-only connector allowlist, tenant examples, alias expansion, invalid profile rollback behavior. |
 | Query parser/understanding | tenant action/entity/query extraction, stock, price, stock+price, search-only, unsupported text, friendly non-lookup guard, out-of-scope current/general question guard, Thai/English variants from Business Profile, entity ID, barcode-like input, context-only follow-up. |
-| LLM slow-path parser | LiteLLM request shape, generic JSON parser output, malformed JSON, wrong enum/action, empty query/searchTerms, low confidence, timeout, truncated completion, shadow mode no user-facing change, assist status/footer/failure copy. |
+| LLM slow-path parser | LiteLLM request shape, generic JSON parser output, malformed JSON, wrong enum/action, empty query/searchTerms, low confidence, timeout, truncated completion, queue timeout/concurrency guard, shadow mode no user-facing change, assist status/footer/failure copy. |
 | Thai query evaluation | PyThaiNLP tokenization fixture, custom dictionary from Business Profile aliases/examples, sensitive-key rejection, context-required phrase suggestions. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
 | Dedup | duplicate webhook event sends at most one reply. |
@@ -29,7 +30,7 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 Latest local run on 2026-06-11:
 
-- `npm test`: 18 files, 116 tests passed.
+- `npm test`: 19 files, 123 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -79,6 +80,8 @@ Current covered cases:
 - Mock auto-parts profile uses the same lookup core with a mocked connector client, proving the core is not bound to construction-materials data.
 - Runtime source isolation test blocks tenant-specific vocabulary from non-test TypeScript source.
 - Lookup metrics include `tenant`, `entity_type`, `action`, `source`, `confidence_band`, `conversation_scope`, `out_of_scope_category`, `parser_path`, and `reply_policy` labels.
+- LLM slow-path parser is guarded by `LLM_MAX_CONCURRENT_CALLS` and `LLM_ASSIST_QUEUE_WAIT_MS`, returning a safe parser rejection instead of allowing unbounded assist backlog.
+- Chatbot QA readiness gate exists under `src/tools/readinessGate.ts` and uses reviewed fixtures in `tools/chatbot-qa/fixtures/`.
 
 Optional local Thai query evaluation gate:
 
@@ -91,6 +94,24 @@ python tools/thai-query-eval/thai_query_eval.py \
   --input tools/thai-query-eval/fixtures/construction-demo.jsonl \
   --output /tmp/thai-query-eval.json
 ```
+
+Chatbot QA readiness gate:
+
+```bash
+BASE_URL=http://localhost:<port> \
+INTERNAL_API_TOKEN=<token> \
+npm run qa:readiness -- --summary-only
+```
+
+Run the slower LiteLLM assist cases before inviting staff:
+
+```bash
+BASE_URL=http://localhost:<port> \
+INTERNAL_API_TOKEN=<token> \
+npm run qa:readiness -- --include-llm --summary-only
+```
+
+The readiness gate uses `docs/chatbot-qa-semantic-layer.md` for KPI definitions. Default acceptance requires scenario pass rate >= 95%, out-of-scope avoided rate = 100%, fast-path p95 <= configured threshold, and SML dependency error rate <= configured threshold.
 
 When SML endpoint is reachable, run read-only smoke only:
 
@@ -134,6 +155,7 @@ Test with:
 - repeated common keyword
 - repeated common keyword with Business Profile and alias cache enabled
 - 20 concurrent Telegram-style requests
+- 5/20/50 concurrent readiness-gate users
 - SML slow response simulation
 - Redis cache disabled
 

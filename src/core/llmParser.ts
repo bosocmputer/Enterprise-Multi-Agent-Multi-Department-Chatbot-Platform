@@ -32,6 +32,7 @@ export type LlmParseRejectionReason =
   | "invalid_schema"
   | "low_confidence"
   | "provider_error"
+  | "queue_timeout"
   | "truncated"
   | "timeout";
 
@@ -67,6 +68,12 @@ export type LlmParseResult =
 export interface LookupLlmParser {
   metadata?: LlmParserMetadata;
   parse(text: string): Promise<LlmParseResult>;
+}
+
+export interface ThrottledLlmParserOptions {
+  maxConcurrentCalls: number;
+  parser: LookupLlmParser;
+  queueWaitMs: number;
 }
 
 export interface BusinessProfileLlmParserOptions {
@@ -137,6 +144,71 @@ export class BusinessProfileLlmParser implements LookupLlmParser {
       }
       return { model: this.metadata.model, reason: "provider_error", status: "rejected" };
     }
+  }
+}
+
+export class ThrottledLlmParser implements LookupLlmParser {
+  readonly metadata: LlmParserMetadata | undefined;
+  private activeCalls = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(private readonly options: ThrottledLlmParserOptions) {
+    this.metadata = options.parser.metadata;
+  }
+
+  async parse(text: string): Promise<LlmParseResult> {
+    const acquired = await this.acquireSlot();
+    if (!acquired) {
+      return {
+        model: this.metadata?.model,
+        reason: "queue_timeout",
+        status: "rejected"
+      };
+    }
+
+    try {
+      return await this.options.parser.parse(text);
+    } finally {
+      this.releaseSlot();
+    }
+  }
+
+  private async acquireSlot(): Promise<boolean> {
+    const maxConcurrent = Math.max(1, this.options.maxConcurrentCalls);
+    if (this.activeCalls < maxConcurrent) {
+      this.activeCalls += 1;
+      return true;
+    }
+
+    const queueWaitMs = Math.max(0, this.options.queueWaitMs);
+    if (queueWaitMs === 0) return false;
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const grantSlot = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(true);
+      };
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const index = this.waiters.indexOf(grantSlot);
+        if (index >= 0) this.waiters.splice(index, 1);
+        resolve(false);
+      }, queueWaitMs);
+      this.waiters.push(grantSlot);
+    });
+  }
+
+  private releaseSlot(): void {
+    const next = this.waiters.shift();
+    if (next) {
+      next();
+      return;
+    }
+    this.activeCalls = Math.max(0, this.activeCalls - 1);
   }
 }
 

@@ -1,0 +1,401 @@
+{
+  "schema": "chatbot_qa_scenarios.v1",
+  "profilePath": "profiles/construction-demo.json",
+  "scenarios": [
+    {
+      "id": "help_start",
+      "category": "help_friendly",
+      "turns": [
+        {
+          "id": "H01",
+          "text": "/start",
+          "metricClass": "help",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "help",
+            "parserPath": "none",
+            "source": "none",
+            "replyIncludes": ["ส่งชื่อ"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "friendly_greeting",
+      "category": "help_friendly",
+      "turns": [
+        {
+          "id": "H02",
+          "text": "สวัสดีครับ",
+          "metricClass": "friendly",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "friendly",
+            "parserPath": "none",
+            "source": "none"
+          }
+        },
+        {
+          "id": "H03",
+          "text": "ขอบคุณครับ",
+          "metricClass": "friendly",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "friendly",
+            "parserPath": "none",
+            "source": "none"
+          }
+        },
+        {
+          "id": "H04",
+          "text": "โอเค",
+          "metricClass": "friendly",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "friendly",
+            "parserPath": "none",
+            "source": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "out_of_scope_current_info",
+      "category": "out_of_scope",
+      "turns": [
+        {
+          "id": "O01",
+          "text": "อากาศวันนี้เป็นยังไง",
+          "metricClass": "out_of_scope",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "out_of_scope_current_info",
+            "parserPath": "none",
+            "policy": "refuse_redirect",
+            "source": "none"
+          }
+        },
+        {
+          "id": "O02",
+          "text": "ข่าววันนี้มีอะไร",
+          "metricClass": "out_of_scope",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "out_of_scope_current_info",
+            "parserPath": "none",
+            "policy": "refuse_redirect",
+            "source": "none"
+          }
+        },
+        {
+          "id": "O03",
+          "text": "ราคาทองวันนี้เท่าไหร่",
+          "metricClass": "out_of_scope",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "out_of_scope_current_info",
+            "parserPath": "none",
+            "policy": "refuse_redirect",
+            "source": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "out_of_scope_general",
+      "category": "out_of_scope",
+      "turns": [
+        {
+          "id": "O04",
+          "text": "กินอะไรดี",
+          "metricClass": "out_of_scope",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "out_of_scope_general",
+            "parserPath": "none",
+            "policy": "refuse_redirect",
+            "source": "none"
+          }
+        },
+        {
+          "id": "O05",
+          "text": "เล่าเรื่องตลกหน่อย",
+          "metricClass": "out_of_scope",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "scope": "out_of_scope_general",
+            "parserPath": "none",
+            "policy": "refuse_redirect",
+            "source": "none"
+          }
+        }
+      ]
+    },
+    {
+      "id": "exact_lookup",
+      "category": "lookup",
+      "turns": [
+        {
+          "id": "E01",
+          "text": "PAINT-01424 ราคา",
+          "metricClass": "fast_path",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["success"],
+            "scope": "lookup_like",
+            "parserPath": "deterministic",
+            "policy": "lookup",
+            "source": "sml",
+            "replyIncludes": ["ราคา"]
+          }
+        },
+        {
+          "id": "E02",
+          "text": "PAINT-01424 มีของไหม",
+          "metricClass": "fast_path",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["success"],
+            "scope": "lookup_like",
+            "parserPath": "deterministic",
+            "policy": "lookup",
+            "source": "sml",
+            "replyIncludes": ["สต็อก"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "natural_lookup",
+      "category": "lookup",
+      "turns": [
+        {
+          "id": "N01",
+          "text": "มีปูนเหลือไหม",
+          "metricClass": "sml_lookup",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["multiple_matches"],
+            "scope": "lookup_like",
+            "parserPath": "deterministic",
+            "policy": "lookup",
+            "source": "sml",
+            "minTotalFound": 1
+          }
+        },
+        {
+          "id": "N02",
+          "text": "น้ำมัน ราคา",
+          "metricClass": "sml_lookup",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["multiple_matches"],
+            "scope": "lookup_like",
+            "parserPath": "deterministic",
+            "policy": "lookup",
+            "source": "sml",
+            "minTotalFound": 6
+          }
+        },
+        {
+          "id": "N03",
+          "text": "เช็คราคาปูนกาว",
+          "metricClass": "sml_lookup",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["multiple_matches", "success", "no_match"],
+            "scope": "lookup_like",
+            "parserPath": "deterministic",
+            "policy": "lookup",
+            "source": "sml"
+          }
+        }
+      ]
+    },
+    {
+      "id": "multi_match_context",
+      "category": "context",
+      "turns": [
+        {
+          "id": "M01",
+          "text": "น้ำมัน ราคา",
+          "metricClass": "sml_lookup",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["multiple_matches"],
+            "source": "sml",
+            "minTotalFound": 6
+          }
+        },
+        {
+          "id": "M02",
+          "text": "เพิ่ม",
+          "metricClass": "context",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "source": "none",
+            "replyIncludes": ["แสดง 6-10"]
+          }
+        },
+        {
+          "id": "M03",
+          "text": "5",
+          "metricClass": "sml_lookup",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["success"],
+            "source": "sml"
+          }
+        },
+        {
+          "id": "M04",
+          "text": "ตัวนี้ราคาเท่าไหร่",
+          "metricClass": "fast_path",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["success"],
+            "parserPath": "deterministic",
+            "source": "sml",
+            "replyIncludes": ["ราคา"]
+          }
+        },
+        {
+          "id": "M05",
+          "text": "ราคา",
+          "metricClass": "fast_path",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["success"],
+            "parserPath": "deterministic",
+            "source": "sml",
+            "replyIncludes": ["ราคา"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "guardrails",
+      "category": "guardrail",
+      "turns": [
+        {
+          "id": "G01",
+          "text": "ตัวนี้ราคาเท่าไหร่",
+          "metricClass": "guardrail",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "parserPath": "none",
+            "source": "none",
+            "replyIncludes": ["ยังไม่มี"]
+          }
+        },
+        {
+          "id": "G02",
+          "text": "เอาแบบถูกสุดมีไหม",
+          "metricClass": "guardrail",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "parserPath": "none",
+            "source": "none",
+            "replyIncludes": ["ยังเลือก"]
+          }
+        },
+        {
+          "id": "G03",
+          "text": "เพิ่ม",
+          "metricClass": "guardrail",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "parserPath": "none",
+            "source": "none",
+            "replyIncludes": ["ยังไม่มี"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "invalid_selection_after_multimatch",
+      "category": "guardrail",
+      "turns": [
+        {
+          "id": "G04",
+          "text": "น้ำมัน ราคา",
+          "metricClass": "sml_lookup",
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["multiple_matches"],
+            "source": "sml"
+          }
+        },
+        {
+          "id": "G05",
+          "text": "9",
+          "metricClass": "guardrail",
+          "expected": {
+            "path": "channel_context",
+            "statusIn": ["reply"],
+            "source": "none",
+            "replyIncludes": ["เลือกเลข 1-5"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "llm_assist_no_match",
+      "category": "llm_assist",
+      "turns": [
+        {
+          "id": "L01",
+          "text": "ขอราคาน้ำมันสนหน่อย",
+          "metricClass": "llm_assist",
+          "requiresLlm": true,
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["multiple_matches", "success", "no_match", "unsupported"],
+            "scope": "lookup_like",
+            "source": "sml",
+            "replyNotIncludes": ["provider_error", "rejected_provider_error"]
+          }
+        },
+        {
+          "id": "L02",
+          "text": "ปูนตราช้าง",
+          "metricClass": "llm_assist",
+          "requiresLlm": true,
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["no_match", "unsupported"],
+            "scope": "lookup_like",
+            "source": "sml",
+            "replyNotIncludes": ["provider_error", "rejected_provider_error"]
+          }
+        },
+        {
+          "id": "L03",
+          "text": "หัวเทียน civic ราคา",
+          "metricClass": "llm_assist",
+          "requiresLlm": true,
+          "expected": {
+            "path": "lookup",
+            "statusIn": ["no_match", "unsupported"],
+            "scope": "lookup_like",
+            "source": "sml",
+            "replyNotIncludes": ["provider_error", "rejected_provider_error"]
+          }
+        }
+      ]
+    }
+  ]
+}
