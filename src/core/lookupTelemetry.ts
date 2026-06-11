@@ -21,13 +21,17 @@ export async function runLookupWithTelemetry(
   options.metrics?.recordLookup(channel, result, durationMs);
   options.logger?.info(
     {
+      action: "action" in result ? result.action : undefined,
       cacheHit: "cacheHit" in result ? result.cacheHit : undefined,
       channel,
       chatHash: hashIdentifier(request.chatId),
       dataset: "datasetLabel" in result ? result.datasetLabel : undefined,
       durationMs,
+      entityType: "entityType" in result ? result.entityType : undefined,
       intent: "intent" in result ? result.intent : undefined,
+      source: "source" in result ? result.source : undefined,
       status: result.status,
+      tenantId: "tenantId" in result ? result.tenantId : undefined,
       userHash: hashIdentifier(request.userId)
     },
     "lookup completed"

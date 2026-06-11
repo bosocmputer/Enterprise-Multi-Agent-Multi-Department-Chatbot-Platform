@@ -16,20 +16,20 @@ BASE_URL=http://localhost:<port> INTERNAL_API_TOKEN=<token> bash scripts/prod-sm
 
 | Area | Required cases |
 | --- | --- |
-| Business Profile | schema validation, missing profile, disabled intent, tenant examples, alias expansion, invalid profile rollback behavior. |
-| Query parser/understanding | stock, price, stock+price, search-only, unsupported text, Thai/English variants from Business Profile, product code, barcode-like input, context-only follow-up. |
-| LLM slow-path parser | LiteLLM request shape, JSON-only parser output, malformed JSON, wrong enum, empty keyword/searchTerms, low confidence, timeout, truncated completion, shadow mode no user-facing change, assist status/footer/failure copy. |
+| Business Profile | schema validation, missing profile, disabled intent, Domain Profile v2 normalization, read-only connector allowlist, tenant examples, alias expansion, invalid profile rollback behavior. |
+| Query parser/understanding | tenant action/entity/query extraction, stock, price, stock+price, search-only, unsupported text, Thai/English variants from Business Profile, entity ID, barcode-like input, context-only follow-up. |
+| LLM slow-path parser | LiteLLM request shape, generic JSON parser output, malformed JSON, wrong enum/action, empty query/searchTerms, low confidence, timeout, truncated completion, shadow mode no user-facing change, assist status/footer/failure copy. |
 | Thai query evaluation | PyThaiNLP tokenization fixture, custom dictionary from Business Profile aliases/examples, sensitive-key rejection, context-required phrase suggestions. |
 | Group gate | Telegram mention, reply-to-bot, command, prefix, no mention; LINE mention component and no mention. |
 | Dedup | duplicate webhook event sends at most one reply. |
 | SML client | allowed tool call, blocked write tool, timeout, malformed JSON, missing `content[0].text`, schema mismatch. |
-| Cache | hit/miss, TTL choice, no error cached as success, short negative cache. |
+| Cache | hit/miss, tenant/entity/action-scoped keys, TTL choice, no error cached as success, short negative cache. |
 | Formatter | no match, multi match, success with stock only, success with price only, timeout fallback. |
 | Redaction | logs do not include tokens, raw secrets, or large raw SML payloads. |
 
 Latest local run on 2026-06-11:
 
-- `npm test`: 15 files, 80 tests passed.
+- `npm test`: 17 files, 89 tests passed.
 - `npm run build`: passed.
 
 ## Integration Tests
@@ -71,6 +71,9 @@ Current covered cases:
 - Context guard resolves `ตัวนี้ราคาเท่าไหร่` against the last product when safe.
 - Selection constraints such as `เอาแบบถูกสุดมีไหม` do not trigger SML search without enough context.
 - Known bare Business Profile terms such as `ปูนตราช้าง` become search lookups instead of generic help.
+- Domain Profile v2 drives action/entity metadata and command aliases without source edits.
+- Runtime source isolation test blocks tenant-specific vocabulary from non-test TypeScript source.
+- Lookup metrics include `tenant`, `entity_type`, `action`, `source`, and `confidence_band` labels.
 
 Optional local Thai query evaluation gate:
 
@@ -97,10 +100,10 @@ Never call `create_sale_reserve` in standard smoke tests.
 ## Acceptance Scenarios
 
 - Happy path: Telegram private message asks stock and price, bot replies with product code/name/unit/stock/price.
-- Domain-neutral profile: adding a new tenant Business Profile changes examples/aliases without source-code edits.
+- Domain-neutral profile: adding a new tenant Business Profile changes entities/actions/examples/aliases without source-code edits.
 - LINE private: verified LINE webhook asks price and gets a reply.
 - LINE group: normal chatter is ignored; @mention stock query gets a reply.
-- No match: bot asks for product code/model/brand, not a fabricated answer.
+- No match: bot asks for clearer ID/model/descriptor, not a fabricated answer.
 - Multiple match: bot asks user to choose among current-page candidates and supports `เพิ่ม` for the next page when more candidates exist.
 - Numeric follow-up: after multiple match, replying `1` chooses candidate 1 with the previous stock/price intent.
 - Intent follow-up: after a successful product lookup, replying `ราคา` or `สต็อก` uses the last product context.
@@ -122,7 +125,7 @@ Initial targets:
 
 Test with:
 
-- repeated exact product code
+- repeated exact entity ID
 - repeated common keyword
 - repeated common keyword with Business Profile and alias cache enabled
 - 20 concurrent Telegram-style requests

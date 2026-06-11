@@ -10,7 +10,7 @@
 | LINE | LINE Bot SDK for Node.js | `https://github.com/line/line-bot-sdk-nodejs` | Official SDK for Messaging API and signature handling patterns. |
 | SML integration | Custom client over `/call` | SML internal endpoint | Keeps scope small and read-only. |
 | Cache/session/dedup | Redis | - | Low-latency cache, locks, rate limits, session context. |
-| Business Profile | JSON/Zod schema first, database/profile service later | - | Keeps tenant vocabulary, examples, aliases, and reply style out of source code. |
+| Business Profile / Domain Profile v2 | JSON/Zod schema first, database/profile service later | - | Keeps tenant entities, actions, connector mappings, vocabulary, examples, aliases, and reply style out of source code. |
 | Background jobs | BullMQ | `https://github.com/taskforcesh/bullmq` | Redis-backed jobs for slow/background work only. |
 | Runtime schemas | Zod | `https://github.com/colinhacks/zod` | Validate env, channel payloads, SML parsed responses, and internal job payloads. |
 | Env validation | envalid or Zod-based env module | `https://github.com/af/envalid` | Fail fast when required config is missing. |
@@ -35,11 +35,11 @@
 
 - Do not use generic database MCP servers in production. The bot should not have arbitrary SQL/database access.
 - Do not use Bun as the production runtime until Node.js implementation is stable and there is a measured reason.
-- Do not use an agent memory framework for store chat memory; Redis last-product context is enough.
+- Do not use an agent memory framework for store chat memory; Redis last-entity context is enough.
 - Do not put BullMQ in the hot path for every lookup.
-- Do not call an LLM for exact stock/price questions.
+- Do not call an LLM for exact ID or clear fast-path questions.
 - Do not add PyThaiNLP or any Python tokenizer to the production hot path until an offline eval proves a measurable search-quality gain.
-- Do not hardcode tenant product names, brand aliases, or business-specific examples in source code.
+- Do not hardcode tenant product/category names, brand aliases, or business-specific examples in source code.
 
 ## Selection Notes
 

@@ -7,6 +7,15 @@ import { LookupOrchestrator } from "./lookupOrchestrator.js";
 
 const profile = loadBusinessProfile("profiles/construction-demo.json");
 
+class RecordingCacheService extends MemoryCacheService {
+  readonly setKeys: string[] = [];
+
+  override async set<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
+    this.setKeys.push(key);
+    await super.set(key, value, ttlSeconds);
+  }
+}
+
 describe("LookupOrchestrator", () => {
   it("asks user to choose when keyword returns multiple candidates", async () => {
     const lookup = new LookupOrchestrator(
@@ -21,8 +30,46 @@ describe("LookupOrchestrator", () => {
     );
 
     await expect(lookup.lookup({ text: "น้ำมัน ราคา" })).resolves.toMatchObject({
+      action: "price",
+      entityType: "inventory_item",
+      source: "sml",
       status: "multiple_matches",
+      tenantId: "construction-demo",
       keyword: "น้ำมัน"
+    });
+  });
+
+  it("maps SML inventory candidates into generic entity metadata", async () => {
+    const lookup = new LookupOrchestrator(
+      {
+        searchProduct: async () => [{ code: "A001", name: "รายการ A", unit: "ชิ้น" }]
+      } as unknown as SmlClient,
+      new MemoryCacheService(),
+      { businessProfile: profile, datasetLabel: "test" }
+    );
+
+    await expect(lookup.lookup({ text: "รายการ หา" })).resolves.toMatchObject({
+      action: "search",
+      candidates: [
+        {
+          code: "A001",
+          entity: {
+            id: "A001",
+            label: "รายการ A",
+            metadata: { unit: "ชิ้น" },
+            type: "inventory_item"
+          }
+        }
+      ],
+      entities: [
+        {
+          id: "A001",
+          label: "รายการ A",
+          type: "inventory_item"
+        }
+      ],
+      entityType: "inventory_item",
+      status: "multiple_matches"
     });
   });
 
@@ -46,20 +93,31 @@ describe("LookupOrchestrator", () => {
   });
 
   it("uses product search to display exact-code name for price-only lookup", async () => {
+    const cache = new RecordingCacheService();
     const lookup = new LookupOrchestrator(
       {
         searchProduct: async () => [{ code: "PAINT-01424", name: "Beger น้ำมันสน 100 เมตร (Premium)" }],
         getProductPrice: async () => [{ unitName: "ถัง", price: 123 }]
       } as unknown as SmlClient,
-      new MemoryCacheService(),
+      cache,
       { businessProfile: profile, datasetLabel: "test" }
     );
 
     await expect(lookup.lookup({ text: "PAINT-01424 ราคา" })).resolves.toMatchObject({
+      action: "price",
+      entity: { id: "PAINT-01424", type: "inventory_item" },
+      entityType: "inventory_item",
       status: "success",
+      tenantId: "construction-demo",
       product: { code: "PAINT-01424", name: "Beger น้ำมันสน 100 เมตร (Premium)" },
       prices: [{ unitName: "ถัง", price: 123 }]
     });
+    expect(cache.setKeys).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("lookup:construction-demo:entity:inventory_item:search:v3:paint-01424"),
+        expect.stringContaining("lookup:construction-demo:entity:inventory_item:action:price:price:PAINT-01424")
+      ])
+    );
   });
 
   it("uses alias-expanded search terms from the business profile", async () => {

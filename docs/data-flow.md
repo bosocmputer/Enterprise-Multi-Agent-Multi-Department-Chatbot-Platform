@@ -1,8 +1,8 @@
 # Data Flow
 
-## 1. Fast Stock/Price Lookup
+## 1. Fast Lookup
 
-Use this path for clear product code or keyword queries that the tenant Business Profile can parse deterministically.
+Use this path for clear entity ID or keyword queries that the tenant Business Profile can parse deterministically. In the current pilot, the entity is an SML inventory item and the actions are availability/price.
 
 ```mermaid
 sequenceDiagram
@@ -16,21 +16,21 @@ sequenceDiagram
   participant Reply as Reply Formatter
   participant Audit as Audit Logger
 
-  User->>Channel: "<product keyword> มีไหม ราคาเท่าไร"
+  User->>Channel: "<entity keyword> <tenant action phrase>"
   Channel->>Adapter: Webhook event
   Adapter->>Adapter: Verify, dedup, group gate, normalize
   Adapter->>Router: NormalizedMessage
-  Router->>Profile: Load tenant intent phrases/aliases
+  Router->>Profile: Load tenant Domain Profile actions/phrases/aliases
   Profile-->>Router: Business Profile
-  Router->>Router: Deterministic parse intent=stock_price, keyword
-  Router->>Cache: Get product/search/stock/price cache
+  Router->>Router: Deterministic parse action/entityType/query
+  Router->>Cache: Get tenant/entity/action-scoped cache
   alt cache hit
     Cache-->>Router: Cached result
   else cache miss
-    Router->>SML: search_product(keyword)
-    SML-->>Router: Product candidates
+    Router->>SML: read-only connector search(query)
+    SML-->>Router: Entity candidates
     Router->>SML: get_stock_balance(code)
-    Router->>SML: get_product_price(code)
+    Router->>SML: get_product_price(entityId)
     SML-->>Router: Stock + price
     Router->>Cache: Store result with TTL
   end
@@ -43,9 +43,9 @@ Rules:
 
 - Do not call LLM on this path.
 - Do not enqueue BullMQ job on this path.
-- Do not hardcode business-specific product names, brands, or aliases in source code.
-- Intent phrases and examples come from Business Profile.
-- Fetch stock and price concurrently after product resolution.
+- Do not hardcode business-specific names, brands, categories, or aliases in source code.
+- Action phrases and examples come from Business Profile.
+- Fetch stock and price concurrently after inventory entity resolution.
 - Validate every SML parsed response before formatting.
 
 ## 2. Ambiguous Follow-Up
@@ -62,10 +62,10 @@ sequenceDiagram
   participant Lookup as Lookup Orchestrator
 
   User->>Adapter: "แล้วตัวท็อปล่ะ"
-  Adapter->>Session: Load last product/search context
+  Adapter->>Session: Load last entity/search context
   Adapter->>Profile: Load tenant profile/examples/aliases
   alt context sufficient
-    Session-->>Parser: Prior product/search context
+    Session-->>Parser: Prior entity/search context
     Profile-->>Parser: Tenant vocabulary
     Parser->>Lookup: Structured query
   else context missing
@@ -75,7 +75,7 @@ sequenceDiagram
 
 Rules:
 
-- LLM may only emit structured parse output such as intent, keyword, constraints, and confidence.
+- LLM may only emit structured parse output such as action, entity type, query, search terms, and confidence.
 - LLM output must not select arbitrary SML tool names.
 - LLM prompt context must be generated from Business Profile data, not source-coded tenant keywords.
 - If confidence is low, ask a clarification question instead of guessing.
@@ -83,11 +83,11 @@ Rules:
 ## 3. No Match
 
 ```text
-search_product(keyword) returns []
+connector search(query) returns []
 -> if LLM assist is enabled, parse once for safer searchTerms
--> retry search_product with validated assist terms only
--> reply: "ไม่พบสินค้า ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นเพิ่ม"
--> do not call stock/price
+-> retry connector search with validated assist terms only
+-> reply with tenant profile no-match copy
+-> do not call fact/detail tools
 -> audit outcome=no_match
 ```
 
@@ -96,20 +96,20 @@ Assist rules:
 - Send at most one assist status per incoming user message.
 - Do not run assist for exact code or clear deterministic queries that already return SML candidates.
 - Reject assist output on timeout, malformed JSON, invalid schema, low confidence, empty keyword/search terms, or truncated provider completion.
-- Never use LLM output as stock, price, or product truth; SML remains the only source for facts.
+- Never use LLM output as lookup facts; SML remains the only source for current inventory facts.
 
 ## 4. Multiple Matches
 
 ```text
-search_product(keyword) returns many candidates
+connector search(query) returns many candidates
 -> collect a bounded candidate set
 -> show 5 candidates at a time
--> reply with product code/name/unit choices
+-> reply with entity ID/label choices
 -> store candidates plus current page in short session context
 -> next user reply can choose by page-relative number/code or ask for "เพิ่ม"
 ```
 
-The bot must not choose a product when confidence is insufficient.
+The bot must not choose an entity when confidence is insufficient.
 
 ## 5. SML Timeout
 
@@ -142,7 +142,7 @@ Telegram group accepts a message only if one is true:
 
 - bot is mentioned
 - message replies to the bot
-- supported command is used, such as `/stock`, `/price`, `/find`
+- supported command is used, as configured by Domain Profile command aliases
 - configured prefix is used
 
 LINE group accepts a message only if one is true:
@@ -167,11 +167,14 @@ Minimum event fields:
   "userIdHash": "hash",
   "messageId": "message id",
   "intent": "stock_price",
-  "productKeyword": "<normalized keyword>",
+  "action": "availability_price",
+  "entityType": "inventory_item",
+  "queryHash": "<hash or normalized metadata>",
   "parserSource": "deterministic",
   "parserConfidence": 0.98,
-  "productCode": "A001",
+  "entityId": "A001",
   "cacheHit": false,
+  "source": "sml",
   "smlTools": ["search_product", "get_stock_balance", "get_product_price"],
   "latencyMs": 842,
   "outcome": "success"

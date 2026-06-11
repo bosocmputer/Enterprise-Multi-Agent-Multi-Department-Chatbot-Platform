@@ -60,10 +60,15 @@ export class MetricsRegistry {
 
   recordLookup(channel: string, result: LookupResult, durationMs: number): void {
     const labels = {
+      action: "action" in result ? result.action ?? "none" : "none",
       channel,
-      status: result.status,
+      confidence_band: confidenceBand(result),
+      entity_type: "entityType" in result ? result.entityType ?? "unknown" : "unknown",
       intent: "intent" in result ? result.intent : "none",
-      cache_hit: "cacheHit" in result ? String(result.cacheHit) : "none"
+      cache_hit: "cacheHit" in result ? String(result.cacheHit) : "none",
+      source: "source" in result ? result.source ?? "unknown" : "unknown",
+      status: result.status,
+      tenant: "tenantId" in result ? result.tenantId ?? "unknown" : "unknown"
     };
     this.counter("parts_lookup_requests_total", "Lookup requests by channel and outcome.", labels);
     this.histogram("parts_lookup_duration_ms", "Lookup duration in milliseconds.", durationMs, labels);
@@ -187,4 +192,11 @@ function compareMetricValues(
 
 function roundMetric(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function confidenceBand(result: LookupResult): "high" | "low" | "medium" | "none" {
+  if ("assist" in result && result.assist?.status === "parsed") return "medium";
+  if ("assist" in result && result.assist?.status === "rejected") return "low";
+  if (result.status === "unsupported" || result.status === "dependency_error") return "none";
+  return "high";
 }

@@ -1,5 +1,6 @@
 import { formatBusinessProfileHelp, type BusinessProfile } from "../config/businessProfile.js";
 import { formatAssistFailureMessage, formatAssistSuccessFooter } from "./assistFormatting.js";
+import { entityDisplayId, entityDisplayLabel } from "./entityAdapter.js";
 import type { LookupIntent, LookupResult, PriceLine, ProductCandidate, StockLine } from "./types.js";
 
 const DEFAULT_PAGE_SIZE = 5;
@@ -25,13 +26,13 @@ export function formatLookupReply(
       break;
     case "no_match":
       reply = [
-        `ไม่พบสินค้าที่ตรงกับ "${result.keyword}"`,
-        profile?.replyStyle.fallbackProductHints ?? "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น"
+        `ไม่พบ${profile?.replyStyle.entityLabel ?? "รายการ"}ที่ตรงกับ "${result.keyword}"`,
+        profile?.replyStyle.fallbackProductHints ?? "ลองส่งรหัส รายละเอียด หรือคำค้นที่เฉพาะเจาะจงขึ้น"
       ].join("\n");
       break;
     case "multiple_matches":
       if (result.candidates.length === 0) {
-        reply = `ไม่พบตัวเลือกสินค้าที่ชัดเจนจาก "${result.keyword}"`;
+        reply = `ไม่พบตัวเลือก${profile?.replyStyle.entityLabel ?? "รายการ"}ที่ชัดเจนจาก "${result.keyword}"`;
         break;
       }
       reply = formatMultipleMatches({
@@ -46,7 +47,7 @@ export function formatLookupReply(
       });
       break;
     case "unsupported":
-      reply = profile ? formatBusinessProfileHelp(profile) : "ส่งชื่อสินค้า รหัส รุ่น หรือยี่ห้อมาได้เลยครับ";
+      reply = profile ? formatBusinessProfileHelp(profile) : "ส่งชื่อรายการ รหัส รุ่น หรือรายละเอียดมาได้เลยครับ";
       break;
     case "dependency_error":
       if (result.reason === "sml_timeout") {
@@ -57,7 +58,7 @@ export function formatLookupReply(
         reply = "ระบบ SML มีปัญหาชั่วคราว กรุณาลองใหม่อีกครั้ง";
         break;
       }
-      reply = "ตอนนี้ดึงข้อมูลสินค้าไม่ได้ กรุณาลองใหม่อีกครั้ง";
+      reply = `ตอนนี้ดึงข้อมูล${profile?.replyStyle.entityLabel ?? ""}ไม่ได้ กรุณาลองใหม่อีกครั้ง`;
       break;
   }
 
@@ -93,13 +94,20 @@ export function formatMultipleMatches(options: {
 
   return [
     `เจอหลายรายการสำหรับ "${options.keyword}"${rangeText}`,
-    ...visible.map((product, index) => `${index + 1}. ${product.code} - ${product.name}`),
-    prompt ?? "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งรหัสสินค้า/คำค้นที่เจาะจงขึ้น"
+    ...visible.map((product, index) => {
+      const id = entityDisplayId(product.entity, product.code);
+      const label = entityDisplayLabel(product.entity, product.name);
+      return `${index + 1}. ${id} - ${label}`;
+    }),
+    prompt ?? "ตอบเลข 1-5 เพื่อเลือกรายการ หรือส่งรหัส/คำค้นที่เจาะจงขึ้น"
   ].join("\n");
 }
 
 function formatSuccess(result: Extract<LookupResult, { status: "success" }>): string {
-  const lines = [`${result.product.code} - ${result.product.name}`];
+  const entity = result.entity ?? result.product.entity;
+  const lines = [
+    `${entityDisplayId(entity, result.product.code)} - ${entityDisplayLabel(entity, result.product.name)}`
+  ];
 
   if (result.stock) {
     lines.push("", "สต็อก:");

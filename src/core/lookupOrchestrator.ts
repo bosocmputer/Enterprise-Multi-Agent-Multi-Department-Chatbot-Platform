@@ -1,4 +1,9 @@
-import type { BusinessProfile } from "../config/businessProfile.js";
+import {
+  actionForLegacyIntent,
+  normalizeDomainProfile,
+  type BusinessProfile,
+  type DomainProfileV2
+} from "../config/businessProfile.js";
 import { SmlClient, SmlClientError } from "../integrations/smlClient.js";
 import type pino from "pino";
 import type { MetricsRegistry } from "../observability/metrics.js";
@@ -6,9 +11,11 @@ import type { CacheService, DedupStore } from "../services/cacheService.js";
 import type { LlmParserMode, LookupLlmParser } from "./llmParser.js";
 import { runLlmParseWithTelemetry } from "./llmParser.js";
 import { assistInfo, startAssist, understandLookupQuery } from "./queryUnderstanding.js";
+import { attachEntities, attachEntity, entitiesFromProducts } from "./entityAdapter.js";
 import type {
   LlmAssistInfo,
   LlmAssistStartEvent,
+  LookupActionId,
   LookupRequest,
   LookupResult,
   ParseOutcome,
@@ -48,6 +55,9 @@ export class LookupOrchestrator {
   private readonly searchCacheTtlSeconds: number;
   private readonly stockCacheTtlSeconds: number;
   private readonly priceCacheTtlSeconds: number;
+  private readonly domainProfile: DomainProfileV2;
+  private readonly source: string;
+  private readonly tenantId: string;
 
   constructor(
     private readonly smlClient: SmlClient,
@@ -62,6 +72,9 @@ export class LookupOrchestrator {
     this.tenantStatus = options.tenantStatus ?? "demo";
     this.llmParser = options.llmParser;
     this.llmParserMode = options.llmParserMode ?? "off";
+    this.domainProfile = normalizeDomainProfile(options.businessProfile);
+    this.source = this.domainProfile.connectors.find((connector) => connector.readOnly)?.source ?? "sml";
+    this.tenantId = options.businessProfile.tenantId;
   }
 
   private readonly businessProfile: BusinessProfile;
@@ -80,38 +93,55 @@ export class LookupOrchestrator {
     });
     if (parsed.status === "unsupported") {
       this.triggerShadowParse(request.text, telemetry);
-      return { status: "unsupported", reason: parsed.reason, assist: parsed.assist };
+      return {
+        status: "unsupported",
+        reason: parsed.reason,
+        assist: parsed.assist,
+        ...this.unsupportedMetadata()
+      };
     }
+    const metadata = this.metadataForParsed(parsed);
 
     try {
       let searchResult = parsed.isExactCode
-        ? { candidates: [{ code: parsed.keyword, name: parsed.keyword }], returned: 1, totalFound: 1 }
-        : await this.searchProductsByTerms(parsed.searchTerms);
+        ? {
+            candidates: [attachEntity({ code: parsed.keyword, name: parsed.keyword }, metadata.entityType)],
+            returned: 1,
+            totalFound: 1
+          }
+        : await this.searchProductsByTerms(parsed.searchTerms, metadata.entityType);
       let candidates = searchResult.candidates;
 
       if (candidates.length === 0) {
         const assisted = await this.retryNoMatchWithAssist(request.text, parsed, telemetry);
         if (assisted?.status === "found") {
           parsed = assisted.parsed;
+          Object.assign(metadata, this.metadataForParsed(parsed));
           searchResult = assisted.searchResult;
           candidates = searchResult.candidates;
         } else {
           this.triggerShadowParse(request.text, telemetry);
-          return { status: "no_match", intent: parsed.intent, keyword: parsed.keyword, assist: assisted?.assist };
+          return {
+            status: "no_match",
+            intent: parsed.intent,
+            keyword: parsed.keyword,
+            assist: assisted?.assist,
+            ...metadata
+          };
         }
       }
 
       if (!parsed.isExactCode && candidates.length > 1) {
-        return multipleMatches(parsed, searchResult);
+        return multipleMatches(parsed, searchResult, metadata);
       }
 
       if (parsed.intent === "search_product") {
-        return multipleMatches(parsed, searchResult);
+        return multipleMatches(parsed, searchResult, metadata);
       }
 
       const product = candidates[0] as ProductCandidate;
       const productDetailPromise = parsed.isExactCode
-        ? this.findExactProduct(product.code).catch(() => undefined)
+        ? this.findExactProduct(product.code, metadata.entityType).catch(() => undefined)
         : undefined;
       let stock = undefined;
       let prices = undefined;
@@ -119,11 +149,11 @@ export class LookupOrchestrator {
 
       const stockPromise =
         parsed.intent === "stock" || parsed.intent === "stock_price"
-          ? this.getCachedStock(product.code)
+          ? this.getCachedStock(product.code, metadata.entityType, metadata.action)
           : undefined;
       const pricePromise =
         parsed.intent === "price" || parsed.intent === "stock_price"
-          ? this.getCachedPrice(product.code)
+          ? this.getCachedPrice(product.code, metadata.entityType, metadata.action)
           : undefined;
 
       const [stockResult, priceResult, productDetail] = await Promise.all([
@@ -141,10 +171,16 @@ export class LookupOrchestrator {
         cacheHit = cacheHit && priceResult.cacheHit;
       }
 
-      const displayProduct = resolveDisplayProduct(product, productDetail, stock?.[0]?.name);
+      const displayProduct = attachEntity(
+        resolveDisplayProduct(product, productDetail, stock?.[0]?.name),
+        metadata.entityType,
+        true
+      );
 
       return {
         status: "success",
+        ...metadata,
+        entity: displayProduct.entity,
         intent: parsed.intent,
         product: displayProduct,
         stock,
@@ -157,22 +193,22 @@ export class LookupOrchestrator {
     } catch (error) {
       if (error instanceof SmlClientError) {
         if (error.code === "timeout") {
-          return { status: "dependency_error", reason: "sml_timeout", assist: parsed.assist };
+          return { status: "dependency_error", reason: "sml_timeout", assist: parsed.assist, ...metadata };
         }
         if (error.code === "invalid_response") {
-          return { status: "dependency_error", reason: "invalid_sml_response", assist: parsed.assist };
+          return { status: "dependency_error", reason: "invalid_sml_response", assist: parsed.assist, ...metadata };
         }
         if (error.code === "circuit_open") {
-          return { status: "dependency_error", reason: "sml_circuit_open", assist: parsed.assist };
+          return { status: "dependency_error", reason: "sml_circuit_open", assist: parsed.assist, ...metadata };
         }
       }
-      return { status: "dependency_error", reason: "sml_error", assist: parsed.assist };
+      return { status: "dependency_error", reason: "sml_error", assist: parsed.assist, ...metadata };
     }
   }
 
-  private async searchProductsByTerms(searchTerms: string[]): Promise<CandidateSearchResult> {
+  private async searchProductsByTerms(searchTerms: string[], entityType: string): Promise<CandidateSearchResult> {
     for (const term of searchTerms) {
-      const result = await this.searchProducts(term);
+      const result = await this.searchProducts(term, entityType);
       const relevantCandidates = result.products.filter((candidate) => productMatchesSearchTerm(candidate, term));
       if (relevantCandidates.length > 0) {
         const keptAllReturnedProducts = relevantCandidates.length === result.products.length;
@@ -186,16 +222,17 @@ export class LookupOrchestrator {
     return { candidates: [] };
   }
 
-  private async searchProducts(keyword: string): Promise<ProductSearchResult> {
-    const key = `sml:search:v2:${normalizeCacheKey(keyword)}`;
+  private async searchProducts(keyword: string, entityType: string): Promise<ProductSearchResult> {
+    const key = `lookup:${this.tenantId}:entity:${entityType}:search:v3:${normalizeCacheKey(keyword)}`;
     const cached = await this.cache.get<ProductSearchResult | ProductCandidate[]>(key);
-    if (cached) return normalizeCachedSearchResult(cached);
+    if (cached) return attachSearchEntities(normalizeCachedSearchResult(cached), entityType);
 
-    return this.fetchWithStampedeGuard(key, this.searchCacheTtlSeconds, () => this.fetchProductSearch(keyword));
+    const result = await this.fetchWithStampedeGuard(key, this.searchCacheTtlSeconds, () => this.fetchProductSearch(keyword));
+    return attachSearchEntities(result, entityType);
   }
 
-  private async findExactProduct(code: string): Promise<ProductCandidate | undefined> {
-    const { products } = await this.searchProducts(code);
+  private async findExactProduct(code: string, entityType: string): Promise<ProductCandidate | undefined> {
+    const { products } = await this.searchProducts(code, entityType);
     return (
       products.find((product) => product.code.toLowerCase() === code.toLowerCase()) ??
       products[0]
@@ -249,22 +286,30 @@ export class LookupOrchestrator {
 
     const assistedParsed: ParsedLookup = {
       status: "parsed",
+      action: llmParsed.action ?? actionForLegacyIntent(this.businessProfile, llmParsed.intent)?.id,
+      entityType: llmParsed.entityType ?? parsed.entityType ?? this.domainProfile.defaultEntityType,
       intent: llmParsed.intent,
       keyword: llmParsed.keyword,
       isExactCode: exactCodePattern.test(llmParsed.keyword),
+      query: llmParsed.query,
       searchTerms: llmParsed.searchTerms,
       assist,
       source: "llm"
     };
+    const metadata = this.metadataForParsed(assistedParsed);
     const searchResult = assistedParsed.isExactCode
-      ? { candidates: [{ code: assistedParsed.keyword, name: assistedParsed.keyword }], returned: 1, totalFound: 1 }
-      : await this.searchProductsByTerms(assistedParsed.searchTerms);
+      ? {
+          candidates: [attachEntity({ code: assistedParsed.keyword, name: assistedParsed.keyword }, metadata.entityType)],
+          returned: 1,
+          totalFound: 1
+        }
+      : await this.searchProductsByTerms(assistedParsed.searchTerms, metadata.entityType);
     if (searchResult.candidates.length === 0) return { status: "not_found", assist };
     return { status: "found", parsed: assistedParsed, searchResult };
   }
 
-  private async getCachedStock(code: string) {
-    const key = `sml:stock:${code}`;
+  private async getCachedStock(code: string, entityType: string, action: LookupActionId | undefined) {
+    const key = `lookup:${this.tenantId}:entity:${entityType}:action:${action ?? "availability"}:stock:${code}`;
     const cached = await this.cache.get<Awaited<ReturnType<SmlClient["getStockBalance"]>>>(key);
     if (cached) return { value: cached, cacheHit: true };
 
@@ -274,8 +319,8 @@ export class LookupOrchestrator {
     return { value, cacheHit: false };
   }
 
-  private async getCachedPrice(code: string) {
-    const key = `sml:price:${code}`;
+  private async getCachedPrice(code: string, entityType: string, action: LookupActionId | undefined) {
+    const key = `lookup:${this.tenantId}:entity:${entityType}:action:${action ?? "price"}:price:${code}`;
     const cached = await this.cache.get<Awaited<ReturnType<SmlClient["getProductPrice"]>>>(key);
     if (cached) return { value: cached, cacheHit: true };
 
@@ -315,22 +360,61 @@ export class LookupOrchestrator {
       telemetry.logger?.warn({ error }, "llm shadow parser failed");
     });
   }
+
+  private metadataForParsed(parsed: ParsedLookup): {
+    action?: LookupActionId;
+    entityType: string;
+    source: string;
+    tenantId: string;
+  } {
+    return {
+      action: parsed.action ?? actionForLegacyIntent(this.businessProfile, parsed.intent)?.id,
+      entityType: parsed.entityType ?? this.domainProfile.defaultEntityType,
+      source: this.source,
+      tenantId: this.tenantId
+    };
+  }
+
+  private unsupportedMetadata(): {
+    entityType: string;
+    source: string;
+    tenantId: string;
+  } {
+    return {
+      entityType: this.domainProfile.defaultEntityType,
+      source: this.source,
+      tenantId: this.tenantId
+    };
+  }
 }
 
-function multipleMatches(parsed: ParsedLookup, searchResult: CandidateSearchResult): LookupResult {
+function multipleMatches(
+  parsed: ParsedLookup,
+  searchResult: CandidateSearchResult,
+  metadata: { action?: LookupActionId; entityType: string; source: string; tenantId: string }
+): LookupResult {
   const totalFound = searchResult.totalFound ?? searchResult.candidates.length;
   const pageSize = MULTI_MATCH_PAGE_SIZE;
   return {
     status: "multiple_matches",
+    ...metadata,
     intent: parsed.intent,
     keyword: parsed.keyword,
     candidates: searchResult.candidates,
+    entities: entitiesFromProducts(searchResult.candidates, metadata.entityType),
     hasMore: searchResult.candidates.length > pageSize,
     pageSize,
     pageStart: 0,
     returned: searchResult.returned ?? searchResult.candidates.length,
     totalFound,
     assist: parsed.assist
+  };
+}
+
+function attachSearchEntities(result: ProductSearchResult, entityType: string): ProductSearchResult {
+  return {
+    ...result,
+    products: attachEntities(result.products, entityType)
   };
 }
 

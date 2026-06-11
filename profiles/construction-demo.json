@@ -2,6 +2,78 @@
   "tenantId": "construction-demo",
   "businessType": "construction-materials",
   "locale": "th-TH",
+  "domain": {
+    "version": 2,
+    "defaultEntityType": "inventory_item",
+    "entities": [
+      {
+        "type": "inventory_item",
+        "label": "สินค้า",
+        "idPattern": "^[A-Z0-9][A-Z0-9_-]{2,}$"
+      }
+    ],
+    "actions": [
+      {
+        "id": "search",
+        "label": "ค้นหา",
+        "legacyIntent": "search_product",
+        "entityTypes": ["inventory_item"],
+        "phrases": ["หา", "ค้นหา", "search", "find"],
+        "commandAliases": ["find", "search"]
+      },
+      {
+        "id": "availability",
+        "label": "เช็กสต็อก",
+        "legacyIntent": "stock",
+        "entityTypes": ["inventory_item"],
+        "phrases": [
+          "มีไหม",
+          "มีมั้ย",
+          "มีของ",
+          "มีของไหม",
+          "มีของมั้ย",
+          "ของไหม",
+          "ของเหลือไหม",
+          "คงเหลือ",
+          "เหลือ",
+          "สต็อก",
+          "stock",
+          "stocks"
+        ],
+        "commandAliases": ["stock"]
+      },
+      {
+        "id": "price",
+        "label": "เช็กราคา",
+        "legacyIntent": "price",
+        "entityTypes": ["inventory_item"],
+        "phrases": ["ราคา", "เช็คราคา", "เช็คราคาหน่อย", "กี่บาท", "เท่าไร", "เท่าไหร่", "price"],
+        "commandAliases": ["price"]
+      },
+      {
+        "id": "availability_price",
+        "label": "เช็กสต็อกและราคา",
+        "legacyIntent": "stock_price",
+        "entityTypes": ["inventory_item"],
+        "phrases": ["มีไหม ราคา", "มีมั้ย ราคา", "มีของไหม ราคาเท่าไร"],
+        "commandAliases": []
+      }
+    ],
+    "connectors": [
+      {
+        "id": "sml-inventory-readonly",
+        "source": "sml",
+        "readOnly": true,
+        "entityTypes": ["inventory_item"],
+        "allowedTools": ["search_product", "get_stock_balance", "get_product_price"],
+        "actionToolMap": {
+          "search": "search_product",
+          "availability": "get_stock_balance",
+          "price": "get_product_price"
+        }
+      }
+    ]
+  },
   "enabledIntents": ["search_product", "stock", "price", "stock_price"],
   "intentPhrases": {
     "stock": [
@@ -47,6 +119,8 @@
     "assistStartingMessage": "กำลังใช้ LiteLLM assist model {model} ช่วยตีความคำถามนี้ครับ ช้าเร็วขึ้นอยู่กับ model ที่ใช้งาน...",
     "assistSuccessFooter": "Assist: LiteLLM {model} ช่วยตีความคำค้น; ข้อมูลสินค้า/ราคา/สต็อกมาจาก SML",
     "assistFailureMessage": "LiteLLM assist model {model} ตีความไม่สำเร็จ ({outcome}, {durationMs}ms) กรุณาส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นให้ชัดขึ้น",
+    "entityLabel": "สินค้า",
+    "entityIdLabel": "รหัสสินค้า",
     "fallbackProductHints": "ลองส่งรหัสสินค้า รุ่น ยี่ห้อ หรือคำค้นที่เฉพาะเจาะจงขึ้น",
     "helpIntro": "ส่งชื่อสินค้า รหัส รุ่น หรือยี่ห้อมาได้เลยครับ ผมจะช่วยเช็กสต็อก/ราคาให้จาก SML",
     "helpFooter": "ถ้าผมเจอหลายรายการ ให้ตอบเลข 1-5 เพื่อเลือก หรือพิมพ์ \"เพิ่ม\" เพื่อดูรายการต่อไป",

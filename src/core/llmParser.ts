@@ -1,17 +1,25 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type pino from "pino";
-import type { BusinessProfile } from "../config/businessProfile.js";
+import {
+  actionForLegacyIntent,
+  legacyIntentForAction,
+  normalizeDomainProfile,
+  type BusinessProfile
+} from "../config/businessProfile.js";
 import type { LiteLlmClient } from "../integrations/litellmClient.js";
 import { LiteLlmClientError } from "../integrations/litellmClient.js";
 import type { MetricsRegistry } from "../observability/metrics.js";
-import type { LookupIntent } from "./types.js";
+import type { LookupActionId, LookupIntent } from "./types.js";
 
 const llmParseJsonSchema = z
   .object({
+    action: z.string().trim().min(1).optional(),
     confidence: z.number().min(0).max(1),
-    intent: z.enum(["search_product", "stock", "price", "stock_price", "unsupported"]),
-    keyword: z.string().trim().min(1),
+    entityType: z.string().trim().min(1).optional(),
+    intent: z.enum(["search_product", "stock", "price", "stock_price", "unsupported"]).optional(),
+    keyword: z.string().optional(),
+    query: z.string().optional(),
     searchTerms: z.array(z.string().trim().min(1)).min(1).max(5)
   })
   .passthrough();
@@ -41,9 +49,12 @@ export interface LlmParseTelemetry {
 export type LlmParseResult =
   | {
       confidence: number;
+      action?: LookupActionId;
+      entityType?: string;
       intent: LookupIntent | "unsupported";
       keyword: string;
       model?: string;
+      query: string;
       searchTerms: string[];
       status: "parsed";
     } & LlmParseTelemetry
@@ -96,7 +107,12 @@ export class BusinessProfileLlmParser implements LookupLlmParser {
         return { model: completion.model, reason: "invalid_schema", status: "rejected" };
       }
 
-      if (!parsed.data.keyword.trim()) {
+      const normalized = normalizeParsedLlmOutput(parsed.data, this.options.profile);
+      if (!normalized) {
+        return { model: completion.model, reason: "invalid_schema", status: "rejected" };
+      }
+
+      if (!normalized.query.trim()) {
         return { model: completion.model, reason: "empty_keyword", status: "rejected" };
       }
 
@@ -105,11 +121,14 @@ export class BusinessProfileLlmParser implements LookupLlmParser {
       }
 
       return {
+        action: normalized.action,
         confidence: parsed.data.confidence,
-        intent: parsed.data.intent,
-        keyword: parsed.data.keyword,
+        entityType: normalized.entityType,
+        intent: normalized.intent,
+        keyword: normalized.query,
         model: completion.model ?? this.metadata.model,
-        searchTerms: normalizeSearchTerms(parsed.data.keyword, parsed.data.searchTerms),
+        query: normalized.query,
+        searchTerms: normalizeSearchTerms(normalized.query, parsed.data.searchTerms),
         status: "parsed"
       };
     } catch (error) {
@@ -142,7 +161,9 @@ export async function runLlmParseWithTelemetry(
   options.logger?.info(
     {
       confidence: result.status === "parsed" ? result.confidence : undefined,
+      action: result.status === "parsed" ? result.action : undefined,
       durationMs,
+      entityType: result.status === "parsed" ? result.entityType : undefined,
       intent: result.status === "parsed" ? result.intent : undefined,
       mode: options.mode,
       model: result.model,
@@ -161,27 +182,98 @@ export function llmParseOutcome(result: LlmParseResult): string {
 }
 
 function buildMessages(text: string, profile: BusinessProfile) {
+  const domain = normalizeDomainProfile(profile);
+  const examples = profile.examples.slice(0, 3).map((example) => ({
+    action: actionForLegacyIntent(profile, example.intent)?.id,
+    query: example.keyword,
+    text: example.text
+  }));
   return [
     {
       role: "system" as const,
       content:
-        "You are a strict JSON parser for Thai inventory lookup messages. Output JSON only. No reasoning. No prose. " +
-        "Do not answer product facts, stock, or price. Allowed intents: search_product, stock, price, stock_price, unsupported. " +
-        'Schema: {"intent":"search_product|stock|price|stock_price|unsupported","keyword":"string","confidence":0.0,"searchTerms":["string"]}. ' +
-        "Use aliases/searchTerms only as possible SML catalog search terms."
+        "You are a strict JSON parser for Thai business lookup messages. Output JSON only. No reasoning. No prose. " +
+        "Do not answer business facts or choose a result. Map the message to an allowed action and entity type only. " +
+        'Schema: {"action":"allowed action id","entityType":"allowed entity type","query":"string","confidence":0.0,"searchTerms":["string"]}. ' +
+        "Use searchTerms only as possible source-system lookup terms. If unsupported, use intent=unsupported."
     },
     {
       role: "user" as const,
       content: JSON.stringify({
-        businessType: profile.businessType,
-        enabledIntents: profile.enabledIntents,
-        examples: profile.examples.slice(0, 3),
+        actions: domain.actions.map((action) => ({
+          id: action.id,
+          legacyIntent: action.legacyIntent,
+          phrases: action.phrases.slice(0, 8)
+        })),
+        defaultEntityType: domain.defaultEntityType,
+        entityTypes: domain.entities.map((entity) => entity.type),
+        examples,
         knownAliases: profile.aliases.flatMap((alias) => [alias.from, ...alias.to]).slice(0, 20),
         locale: profile.locale,
         text
       })
     }
   ];
+}
+
+function normalizeParsedLlmOutput(
+  data: z.infer<typeof llmParseJsonSchema>,
+  profile: BusinessProfile
+):
+  | {
+      action?: LookupActionId;
+      entityType: string;
+      intent: LookupIntent | "unsupported";
+      query: string;
+    }
+  | undefined {
+  const domain = normalizeDomainProfile(profile);
+  const allowedEntityTypes = new Set([
+    domain.defaultEntityType,
+    ...domain.entities.map((entity) => entity.type),
+    ...domain.actions.flatMap((action) => action.entityTypes)
+  ]);
+  const query = (data.query ?? data.keyword ?? "").trim();
+  const requestedAction = data.action?.trim();
+  const action = requestedAction ? domain.actions.find((item) => item.id === requestedAction) : undefined;
+  if (requestedAction && !action) return undefined;
+
+  const intentFromAction = action ? legacyIntentForAction(profile, action.id) : undefined;
+  const intentFromPayload = data.intent;
+  if (!intentFromPayload && !intentFromAction) return undefined;
+  if (intentFromPayload === "unsupported") {
+    return {
+      entityType: normalizeEntityType(data.entityType, allowedEntityTypes, domain.defaultEntityType) ?? domain.defaultEntityType,
+      intent: "unsupported",
+      query
+    };
+  }
+  if (intentFromPayload && intentFromAction && intentFromPayload !== intentFromAction) return undefined;
+
+  const intent = intentFromPayload ?? intentFromAction;
+  if (!intent) return undefined;
+
+  const entityType =
+    normalizeEntityType(data.entityType, allowedEntityTypes, domain.defaultEntityType) ??
+    action?.entityTypes[0] ??
+    domain.defaultEntityType;
+  if (data.entityType && !allowedEntityTypes.has(data.entityType)) return undefined;
+
+  return {
+    action: action?.id ?? actionForLegacyIntent(profile, intent)?.id,
+    entityType,
+    intent,
+    query
+  };
+}
+
+function normalizeEntityType(
+  value: string | undefined,
+  allowedEntityTypes: Set<string>,
+  defaultValue: string
+): string | undefined {
+  if (!value) return defaultValue;
+  return allowedEntityTypes.has(value) ? value : undefined;
 }
 
 function normalizeSearchTerms(keyword: string, searchTerms: string[]): string[] {

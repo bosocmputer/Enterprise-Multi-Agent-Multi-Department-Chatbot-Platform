@@ -1,14 +1,14 @@
-import type { BusinessProfile } from "../config/businessProfile.js";
+import {
+  actionForLegacyIntent,
+  allDomainPhrases,
+  commandAliasesForLegacyIntents,
+  defaultEntityType,
+  phrasesForLegacyIntent,
+  type BusinessProfile
+} from "../config/businessProfile.js";
 import type { LookupIntent, ParseOutcome } from "./types.js";
 
 const exactCodePattern = /^[A-Z0-9][A-Z0-9_-]{2,}$/i;
-const commandPattern = /^\/(stock|price|find|search)(?:@\S+)?\b/i;
-const commandToIntent: Record<string, LookupIntent> = {
-  find: "search_product",
-  price: "price",
-  search: "search_product",
-  stock: "stock"
-};
 
 export function parseLookupQuery(input: string, profile: BusinessProfile): ParseOutcome {
   const original = input.trim();
@@ -17,23 +17,24 @@ export function parseLookupQuery(input: string, profile: BusinessProfile): Parse
   }
 
   const withoutMentions = original.replace(/@\S+/g, " ");
-  const commandMatch = withoutMentions.match(commandPattern);
+  const commandPattern = commandPatternForProfile(profile);
+  const commandMatch = commandPattern ? withoutMentions.match(commandPattern) : undefined;
   const command = commandMatch?.[1]?.toLowerCase();
-  const commandIntent = command ? commandToIntent[command] : undefined;
+  const commandIntent = command
+    ? commandAliasesForLegacyIntents(profile).find((item) => item.command === command)?.intent
+    : undefined;
 
-  let working = withoutMentions
-    .replace(commandPattern, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  let working = (commandPattern ? withoutMentions.replace(commandPattern, " ") : withoutMentions).replace(/\s+/g, " ").trim();
 
   const patternParsed = commandIntent ? undefined : parseProfilePattern(working, profile);
   if (patternParsed) return patternParsed;
 
   const lower = working.toLowerCase();
-  const hasStockPrice = containsAny(lower, profile.intentPhrases.stock_price);
-  const hasStock = commandIntent === "stock" || containsAny(lower, profile.intentPhrases.stock);
-  const hasPrice = commandIntent === "price" || containsAny(lower, profile.intentPhrases.price);
-  const hasSearch = commandIntent === "search_product" || containsAny(lower, profile.intentPhrases.search_product);
+  const hasStockPrice = containsAny(lower, phrasesForLegacyIntent(profile, "stock_price"));
+  const hasStock = commandIntent === "stock" || containsAny(lower, phrasesForLegacyIntent(profile, "stock"));
+  const hasPrice = commandIntent === "price" || containsAny(lower, phrasesForLegacyIntent(profile, "price"));
+  const hasSearch =
+    commandIntent === "search_product" || containsAny(lower, phrasesForLegacyIntent(profile, "search_product"));
 
   let intent: LookupIntent | undefined = commandIntent;
   if (!intent) {
@@ -80,11 +81,15 @@ function parseProfilePattern(input: string, profile: BusinessProfile): ParseOutc
 }
 
 function parsedOutcome(intent: LookupIntent, keyword: string, profile: BusinessProfile): Extract<ParseOutcome, { status: "parsed" }> {
+  const action = actionForLegacyIntent(profile, intent);
   return {
     status: "parsed",
+    action: action?.id,
+    entityType: action?.entityTypes[0] ?? defaultEntityType(profile),
     intent,
     keyword,
     isExactCode: exactCodePattern.test(keyword),
+    query: keyword,
     searchTerms: expandSearchTerms(keyword, profile)
   };
 }
@@ -117,14 +122,20 @@ function firstEnabledIntent(profile: BusinessProfile, intents: LookupIntent[]): 
 
 function phrasesForRemoval(profile: BusinessProfile): string[] {
   return [
-    ...profile.intentPhrases.stock_price,
-    ...profile.intentPhrases.stock,
-    ...profile.intentPhrases.price,
-    ...profile.intentPhrases.search_product,
+    ...allDomainPhrases(profile),
     ...profile.fillerPhrases
   ]
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
+}
+
+function commandPatternForProfile(profile: BusinessProfile): RegExp | undefined {
+  const commands = commandAliasesForLegacyIntents(profile)
+    .map((item) => item.command)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  if (commands.length === 0) return undefined;
+  return new RegExp(`^\\/(${commands.map(escapeRegExp).join("|")})(?:@\\S+)?\\b`, "i");
 }
 
 function normalizeText(value: string): string {

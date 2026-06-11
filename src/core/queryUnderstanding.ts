@@ -46,9 +46,12 @@ export async function understandLookupQuery(
 
   return {
     status: "parsed",
+    action: llmParsed.action,
+    entityType: llmParsed.entityType,
     intent: llmParsed.intent,
     keyword: llmParsed.keyword,
     isExactCode: exactCodePattern.test(llmParsed.keyword),
+    query: llmParsed.query,
     searchTerms: llmParsed.searchTerms,
     assist,
     source: "llm"

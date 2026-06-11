@@ -1,13 +1,22 @@
-import { formatBusinessProfileHelp, phraseForIntent, type BusinessProfile } from "../config/businessProfile.js";
+import {
+  formatBusinessProfileHelp,
+  phraseForIntent,
+  phrasesForLegacyIntent,
+  type BusinessProfile
+} from "../config/businessProfile.js";
 import { formatMultipleMatches } from "../core/responseFormatter.js";
-import type { LookupIntent, LookupResult, ProductCandidate } from "../core/types.js";
+import type { EntityCandidate, LookupActionId, LookupIntent, LookupResult, ProductCandidate } from "../core/types.js";
 import type { CacheService } from "../services/cacheService.js";
 
 export interface ChatContext {
+  action?: LookupActionId;
   candidatePageStart?: number;
   candidates?: ProductCandidate[];
+  entities?: EntityCandidate[];
+  entityType?: string;
   intent?: LookupIntent;
   keyword?: string;
+  lastEntity?: EntityCandidate;
   lastProduct?: ProductCandidate;
   pageSize?: number;
   totalFound?: number;
@@ -54,7 +63,7 @@ export async function resolveTextWithContext(options: {
     if (numericSelection < 0 || numericSelection >= visibleCount) {
       return {
         kind: "reply",
-        text: `กรุณาเลือกเลข 1-${visibleCount || 1} หรือส่งรหัสสินค้า`
+        text: `กรุณาเลือกเลข 1-${visibleCount || 1} หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
       };
     }
     const selected = context.candidates[pageStart + numericSelection];
@@ -88,7 +97,7 @@ export async function resolveTextWithContext(options: {
     if (!context?.lastProduct) {
       return {
         kind: "reply",
-        text: "ยังไม่รู้ว่าสินค้าตัวไหน กรุณาส่งรหัสสินค้า หรือค้นหาสินค้าก่อน"
+        text: options.businessProfile.replyStyle.noContextPrompt
       };
     }
     return { kind: "lookup", text: `${context.lastProduct.code} ${intentPrompt(intentOnly, options.businessProfile)}` };
@@ -102,7 +111,7 @@ export async function resolveTextWithContext(options: {
     return { kind: "lookup", text: `${normalized} ${intentPrompt(context.intent, options.businessProfile)}` };
   }
 
-  if (isKnownBareProductKeyword(normalized, options.businessProfile)) {
+  if (isKnownBareProfileKeyword(normalized, options.businessProfile)) {
     return { kind: "lookup", text: `${normalized} ${phraseForIntent(options.businessProfile, "search_product")}` };
   }
 
@@ -121,8 +130,11 @@ export async function saveLookupContext(options: {
     await options.contextStore.set<ChatContext>(
       options.key,
       {
+        action: options.result.action,
         candidatePageStart: options.result.pageStart ?? 0,
         candidates: options.result.candidates,
+        entities: options.result.entities,
+        entityType: options.result.entityType,
         intent: normalizeContextIntent(options.result.intent),
         keyword: options.result.keyword,
         pageSize: options.result.pageSize ?? 5,
@@ -137,7 +149,10 @@ export async function saveLookupContext(options: {
     await options.contextStore.set<ChatContext>(
       options.key,
       {
+        action: options.result.action,
+        entityType: options.result.entityType,
         intent: normalizeContextIntent(options.result.intent),
+        lastEntity: options.result.entity,
         lastProduct: options.result.product
       },
       options.ttlSeconds
@@ -155,10 +170,12 @@ export function isHelpText(text: string): boolean {
 
 export function parseIntentOnly(text: string, profile: BusinessProfile): LookupIntent | undefined {
   const normalized = text.trim().toLowerCase();
-  const wantsStock = ["stock", "stocks", ...profile.intentPhrases.stock].some(
+  const wantsStock = ["stock", "stocks", ...phrasesForLegacyIntent(profile, "stock")].some(
     (term) => term.trim().toLowerCase() === normalized
   );
-  const wantsPrice = ["price", ...profile.intentPhrases.price].some((term) => term.trim().toLowerCase() === normalized);
+  const wantsPrice = ["price", ...phrasesForLegacyIntent(profile, "price")].some(
+    (term) => term.trim().toLowerCase() === normalized
+  );
   if (wantsStock && wantsPrice) return "stock_price";
   if (wantsStock) return "stock";
   if (wantsPrice) return "price";
@@ -253,12 +270,12 @@ function resolveContextRequiredPhrase(options: {
       const visibleCount = visibleCandidateCount(options.context);
       return {
         kind: "reply",
-        text: `ตอนนี้ยังเลือกสินค้าจากคำว่า "${options.marker}" อัตโนมัติไม่ได้ กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่งรหัสสินค้า`
+        text: `ตอนนี้ยังเลือก${options.businessProfile.replyStyle.entityLabel}จากคำว่า "${options.marker}" อัตโนมัติไม่ได้ กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
       };
     }
     return {
       kind: "reply",
-      text: `ตอนนี้ยังเลือกสินค้าจากคำว่า "${options.marker}" ไม่ได้ กรุณาส่งชื่อสินค้า รุ่น ยี่ห้อ หรือรหัสสินค้าให้ชัดเจนขึ้น`
+      text: `ตอนนี้ยังเลือก${options.businessProfile.replyStyle.entityLabel}จากคำว่า "${options.marker}" ไม่ได้ กรุณาส่งรายละเอียดหรือ${options.businessProfile.replyStyle.entityIdLabel}ให้ชัดเจนขึ้น`
     };
   }
 
@@ -273,7 +290,7 @@ function resolveContextRequiredPhrase(options: {
     const visibleCount = visibleCandidateCount(options.context);
     return {
       kind: "reply",
-      text: `ยังไม่รู้ว่า "${options.marker}" คือรายการไหน กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่งรหัสสินค้า`
+      text: `ยังไม่รู้ว่า "${options.marker}" คือรายการไหน กรุณาเลือกเลข 1-${visibleCount} จากรายการล่าสุด หรือส่ง${options.businessProfile.replyStyle.entityIdLabel}`
     };
   }
   return {
@@ -306,26 +323,26 @@ function detectContextRequiredPhrase(
 
 function parseIntentFromText(text: string, profile: BusinessProfile): LookupIntent | undefined {
   const normalized = normalizeText(text);
-  const hasStockPrice = containsAny(normalized, profile.intentPhrases.stock_price);
-  const hasStock = containsAny(normalized, profile.intentPhrases.stock);
-  const hasPrice = containsAny(normalized, profile.intentPhrases.price);
+  const hasStockPrice = containsAny(normalized, phrasesForLegacyIntent(profile, "stock_price"));
+  const hasStock = containsAny(normalized, phrasesForLegacyIntent(profile, "stock"));
+  const hasPrice = containsAny(normalized, phrasesForLegacyIntent(profile, "price"));
   if (hasStockPrice || (hasStock && hasPrice)) return "stock_price";
   if (hasPrice) return "price";
   if (hasStock) return "stock";
   return undefined;
 }
 
-function isKnownBareProductKeyword(text: string, profile: BusinessProfile): boolean {
+function isKnownBareProfileKeyword(text: string, profile: BusinessProfile): boolean {
   const normalized = normalizeText(text);
   if (!normalized || parseIntentFromText(normalized, profile)) return false;
 
-  return knownProductTerms(profile).some((term) => {
+  return knownProfileTerms(profile).some((term) => {
     const normalizedTerm = normalizeText(term);
     return normalizedTerm && (normalized === normalizedTerm || normalized.includes(normalizedTerm));
   });
 }
 
-function knownProductTerms(profile: BusinessProfile): string[] {
+function knownProfileTerms(profile: BusinessProfile): string[] {
   return [
     ...profile.examples.map((example) => example.keyword),
     ...profile.aliases.flatMap((alias) => [alias.from, ...alias.to])

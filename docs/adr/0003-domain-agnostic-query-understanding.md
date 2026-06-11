@@ -14,7 +14,7 @@ Hardcoding terms such as brand aliases or product categories in TypeScript would
 
 - Hardcode more parser terms in source: fastest short-term, but does not scale across businesses and creates hidden behavior changes during deploy.
 - LLM-first parser for every message: flexible, but slower, more expensive, and harder to prove safe.
-- Domain-agnostic query understanding with tenant Business Profiles: keeps fast deterministic parsing where possible while moving business vocabulary into data/config and using LLM only for ambiguity.
+- Domain-agnostic query understanding with tenant Business Profiles and Domain Profile v2: keeps fast deterministic parsing where possible while moving entities, actions, connector mappings, and business vocabulary into data/config and using LLM only for ambiguity.
 
 ## Scale And Failure Modes
 
@@ -35,17 +35,17 @@ Hardcoding terms such as brand aliases or product categories in TypeScript would
 Introduce a Domain-Agnostic Query Understanding Layer:
 
 - Source code defines generic schemas, safety rules, and parser contracts.
-- Tenant Business Profile provides intent phrases, examples, aliases, locale, reply style, and data-source labels.
+- Tenant Business Profile provides Domain Profile v2 entities/actions/connectors, phrases, examples, aliases, locale, reply style, and data-source labels.
 - Deterministic parser uses Business Profile first for the hot path.
 - Session context can infer follow-up intent when the user omits stock/price wording.
-- Optional LLM parser is a slow-path helper that returns schema-validated JSON only.
+- Optional LLM parser is a slow-path helper that returns schema-validated `action`, `entityType`, `query`, `searchTerms`, and `confidence` JSON only.
 - Lookup facts still come only from SML MCP read-only tools.
 
 ## Consequences
 
-- Positive: the platform can support multiple business domains without code changes for product vocabulary.
+- Positive: the platform can support multiple business domains without code changes for entity vocabulary or action phrasing.
 - Positive: exact/common queries remain fast and cheap.
-- Positive: LLM output is constrained to query understanding and cannot fabricate stock/price.
+- Positive: LLM output is constrained to query understanding and cannot fabricate source facts.
 - Negative: we need profile schema, validation, cache invalidation, and regression tests before broad tenant rollout.
 - Negative: initial implementation is slightly more complex than adding ad hoc parser terms.
 

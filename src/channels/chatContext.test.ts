@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { loadBusinessProfile } from "../config/businessProfile.js";
 import { MemoryCacheService } from "../services/cacheService.js";
-import { resolveTextWithContext, saveLookupContext } from "./chatContext.js";
+import { resolveTextWithContext, saveLookupContext, type ChatContext } from "./chatContext.js";
 
 const profile = loadBusinessProfile("profiles/construction-demo.json");
 
@@ -55,6 +55,36 @@ describe("chat context helpers", () => {
     await expect(resolveTextWithContext({ businessProfile: profile, contextStore: store, key: "k", text: "ราคา" })).resolves.toEqual({
       kind: "lookup",
       text: "A001 ราคา"
+    });
+  });
+
+  it("stores generic entity metadata with the short-lived context", async () => {
+    const store = new MemoryCacheService();
+    await saveLookupContext({
+      contextStore: store,
+      key: "k",
+      result: {
+        action: "price",
+        candidates: [
+          {
+            code: "A001",
+            entity: { id: "A001", label: "Entry A", type: "catalog_entry" },
+            name: "Entry A"
+          }
+        ],
+        entities: [{ id: "A001", label: "Entry A", type: "catalog_entry" }],
+        entityType: "catalog_entry",
+        intent: "price",
+        keyword: "entry",
+        status: "multiple_matches"
+      },
+      ttlSeconds: 300
+    });
+
+    await expect(store.get<ChatContext>("k")).resolves.toMatchObject({
+      action: "price",
+      entities: [{ id: "A001", label: "Entry A", type: "catalog_entry" }],
+      entityType: "catalog_entry"
     });
   });
 

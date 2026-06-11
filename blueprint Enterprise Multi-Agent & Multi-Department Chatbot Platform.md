@@ -1,17 +1,17 @@
-# Blueprint: Domain-Agnostic Inventory Lookup Chatbot Platform
+# Blueprint: Domain-Agnostic Lookup Chatbot Platform
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
 
 ## 1. Product Definition
 
-Build a speed-first internal chatbot that lets staff ask for product availability and price from chat across different business domains.
+Build a speed-first internal chatbot that lets staff ask tenant-approved lookup questions from chat across different business domains.
 
-The platform must not hardcode business-specific product keywords, brands, aliases, or examples in source code. Each tenant/business supplies a Business Profile that describes enabled intents, vocabulary, examples, aliases, and data-source settings.
+The platform must not hardcode business-specific product keywords, brands, categories, aliases, or examples in source code. Each tenant/business supplies a Business Profile with Domain Profile v2 that describes entities, actions, vocabulary, examples, aliases, and connector/source settings.
 
 The first production shape is a read-only lookup service:
 
 - Staff can ask from Telegram private chat, Telegram groups, LINE 1-1 chats, and LINE groups.
-- The bot answers stock and price using SML MCP read-only tools.
+- For the first inventory pilot, the bot answers stock and price using SML MCP read-only tools.
 - The bot is optimized for fast deterministic lookup before AI, using tenant-configured intent phrases and examples.
 - AI/LLM parsing is optional and used only for ambiguous messages.
 - Thai tokenization/segmentation tools such as PyThaiNLP are developer evaluation tools first; they help improve aliases, context guards, and tests without joining the runtime hot path.
@@ -19,12 +19,12 @@ The first production shape is a read-only lookup service:
 
 ## 2. Goals
 
-- Answer common stock/price questions quickly and consistently.
+- Answer common tenant lookup questions quickly and consistently.
 - Make Telegram the easiest pilot/test channel before LINE rollout.
 - Keep SML as the source of truth and avoid duplicated business rules.
 - Support new business domains by changing tenant Business Profile data, not chatbot source code.
 - Prevent accidental replies in noisy groups with mention/command gates.
-- Avoid hallucinated product, stock, or price information.
+- Avoid hallucinated source facts.
 - Provide auditability for who asked what and which SML data was used.
 
 ## 3. Non-Goals For MVP
@@ -33,32 +33,32 @@ The first production shape is a read-only lookup service:
 - No admin UI.
 - No multi-department RBAC unless later business scope needs it.
 - No generic SQL or direct database access from the bot.
-- No full product master sync unless SML keyword search is not good enough.
+- No full source master sync unless the source-system search is not good enough.
 - No LLM call for every request.
-- No hardcoded tenant product terms, brand aliases, or business-specific keyword lists in source code.
+- No hardcoded tenant product/category terms, brand aliases, or business-specific keyword lists in source code.
 - No long-term customer conversation memory.
 
 ## 4. Primary Use Cases
 
-### 4.1 Stock And Price
+### 4.1 Availability And Price
 
 User asks, using a phrase natural to that tenant:
 
 ```text
-<product keyword> มีไหม ราคาเท่าไร
+<entity keyword> <tenant action phrase>
 ```
 
 System behavior:
 
 1. Normalize channel payload into a common internal message.
 2. Load the tenant Business Profile.
-3. Detect intent as `stock_price` from configured intent phrases, context, or optional LLM parse.
-4. Extract and normalize product keyword.
-5. Search product through cache or SML `search_product`.
-6. If exactly one confident product is found, fetch stock and price.
-7. Reply with product code, name, unit, stock, price, and freshness.
+3. Detect action/entity/query from configured action phrases, context, or optional LLM parse.
+4. Extract and normalize entity query or exact ID.
+5. Search through tenant/entity/action-scoped cache or the connector adapter.
+6. If exactly one confident entity is found, fetch allowed source facts for that action.
+7. Reply with entity ID, label, source facts, and freshness.
 
-### 4.2 Product Code Lookup
+### 4.2 Exact Entity ID Lookup
 
 User asks:
 
@@ -68,12 +68,12 @@ A001 ราคา
 
 System behavior:
 
-1. Recognize likely product code.
+1. Recognize likely entity ID.
 2. Skip broad search when the code is exact.
 3. Fetch price, optionally stock if requested.
 4. Reply with concise result.
 
-### 4.3 Ambiguous Product
+### 4.3 Ambiguous Entity
 
 User asks:
 
@@ -85,7 +85,7 @@ System behavior:
 
 1. Use last session context if available.
 2. If context is insufficient, ask a disambiguation question.
-3. If LLM parser is enabled, use it only to produce structured search terms, never final facts.
+3. If LLM parser is enabled, use it only to produce structured action/entity/query/search terms, never final facts.
 
 ### 4.4 Group Chat
 
@@ -107,9 +107,9 @@ System behavior:
 
 1. Use recent session context to infer whether the user is still asking stock, price, or search.
 2. Use tenant Business Profile aliases and examples to normalize wording.
-3. If deterministic config cannot parse the message, optional LLM parser may emit structured JSON with `intent`, `keyword`, `aliases`, `constraints`, and `confidence`.
+3. If deterministic config cannot parse the message, optional LLM parser may emit structured JSON with `action`, `entityType`, `query`, `searchTerms`, and `confidence`.
 4. Search SML with normalized terms and aliases.
-5. If SML returns no or many candidates, ask the user to clarify. Do not fabricate a matching product.
+5. If the connector returns no or many candidates, ask the user to clarify. Do not fabricate a matching entity.
 
 ## 5. Architecture
 
@@ -139,7 +139,7 @@ Telegram Webhook     LINE Webhook
                                   |
                              SML MCP Client
                                   |
-          search_product -> get_stock_balance + get_product_price
+          action connector -> read-only source tools
                                   |
                            Response Formatter
                                   |
@@ -161,13 +161,13 @@ webhook -> verify -> normalize -> load business profile -> deterministic parse -
 Use BullMQ only when a task is intentionally slow or asynchronous:
 
 - SML timeout retry after the user already received a fallback.
-- Product alias/index refresh from tenant catalog or external profile source.
+- Entity alias/index refresh from tenant catalog or external profile source.
 - Offline Thai query evaluation from reviewed/redacted no-match and unsupported examples.
 - Cache warming.
 - Audit export.
 - Optional LLM parsing that may exceed chat response budget.
 
-## 6.1 Business Profile Contract
+## 6.1 Business Profile / Domain Profile Contract
 
 Business Profile is tenant-specific data loaded from env/config, database, or a profile service. It is not hardcoded in TypeScript source.
 
@@ -178,6 +178,41 @@ Minimum shape:
   "tenantId": "customer-a",
   "businessType": "retail",
   "locale": "th-TH",
+  "domain": {
+    "version": 2,
+    "defaultEntityType": "inventory_item",
+    "entities": [{ "type": "inventory_item", "label": "สินค้า" }],
+    "actions": [
+      {
+        "id": "availability",
+        "legacyIntent": "stock",
+        "entityTypes": ["inventory_item"],
+        "phrases": ["มีไหม", "เหลือไหม"],
+        "commandAliases": ["stock"]
+      },
+      {
+        "id": "price",
+        "legacyIntent": "price",
+        "entityTypes": ["inventory_item"],
+        "phrases": ["ราคา", "เท่าไร"],
+        "commandAliases": ["price"]
+      }
+    ],
+    "connectors": [
+      {
+        "id": "sml-inventory-readonly",
+        "source": "sml",
+        "readOnly": true,
+        "entityTypes": ["inventory_item"],
+        "allowedTools": ["search_product", "get_stock_balance", "get_product_price"],
+        "actionToolMap": {
+          "search": "search_product",
+          "availability": "get_stock_balance",
+          "price": "get_product_price"
+        }
+      }
+    ]
+  },
   "enabledIntents": ["search_product", "stock", "price", "stock_price"],
   "intentPhrases": {
     "stock": ["มีไหม", "เหลือไหม"],
@@ -200,8 +235,9 @@ Minimum shape:
 Rules:
 
 - Source code may define generic intent schemas and safety constraints only.
-- Product names, brands, local nicknames, and business-specific examples belong in Business Profile or an alias/catalog index.
+- Entity names, brands, local nicknames, and business-specific examples belong in Business Profile or an alias/catalog index.
 - LLM prompts must be generated from the profile and must return schema-validated JSON only.
+- Runtime core works with generic `entity`, `action`, `source`, `context`, and `disambiguation` metadata; inventory fields are compatibility surfaces of the current SML adapter.
 - If the profile is missing or invalid, production startup must fail fast or disable the affected tenant.
 
 ## 7. SML MCP Read-Only Contract
@@ -239,9 +275,9 @@ Targets are measured from webhook receipt to reply send attempt.
 
 Implementation choices:
 
-- Parallelize stock and price calls after the product is resolved.
+- Parallelize stock and price calls after the inventory entity is resolved.
 - Use short TTL cache for stock/price.
-- Use longer TTL cache for product search and aliases.
+- Use longer TTL cache for entity search and aliases.
 - Set hard timeouts on all outbound SML, Telegram, LINE, Redis, and LLM calls.
 
 ## 9. Cache Strategy
@@ -251,13 +287,13 @@ Redis keys are implementation contracts, not user-visible API.
 | Data | Example key | TTL | Notes |
 | --- | --- | ---: | --- |
 | Webhook dedup | `dedup:{channel}:{eventId}` | 5-15m | Prevent duplicate replies. |
-| Product search | `sml:search:{normalizedKeyword}` | 5-30m | Safe to cache longer than stock. |
+| Entity search | `lookup:{tenantId}:entity:{entityType}:search:{normalizedQuery}` | 5-30m | Safe to cache longer than volatile facts. |
 | Tenant profile | `profile:{tenantId}` | 5-30m | Config/profile cache; invalidate on profile update. |
 | Alias/search index | `alias:{tenantId}:{normalizedKeyword}` | 5-60m | Optional expansion from profile/catalog, not hardcoded code. |
-| LLM parse result | `llm:parse:{tenantId}:{messageHash}` | 5-30m | Optional structured parse cache; never cache final stock/price facts. |
-| Product price | `sml:price:{productCode}` | 1-10m | Tune with SML/business rules. |
-| Stock balance | `sml:stock:{productCode}` | 15-60s | Keep short to avoid stale stock. |
-| Last query context | `session:{channel}:{chatId}:{userId}:lastProduct` | 15-60m | Used for follow-up questions. |
+| LLM parse result | `llm:parse:{tenantId}:{messageHash}` | 5-30m | Optional structured parse cache; never cache final source facts. |
+| Price/action fact | `lookup:{tenantId}:entity:{entityType}:action:{action}:price:{entityId}` | 1-10m | Tune with SML/business rules. |
+| Availability/action fact | `lookup:{tenantId}:entity:{entityType}:action:{action}:stock:{entityId}` | 15-60s | Keep short to avoid stale values. |
+| Last query context | `session:{channel}:{chatId}:{userId}:lastEntity` | 15-60m | Used for follow-up questions. |
 | Rate limit | `rl:{channel}:{chatId}:{userId}` | 1m | Protect SML and bot. |
 
 Replies that use cached stock should include a short freshness indicator when helpful.
@@ -268,8 +304,8 @@ The bot must prefer clarification over guessing.
 
 Required states:
 
-- No product found: ask for product code, model, brand, or clearer keyword.
-- Multiple products found: show top 3-5 choices with product codes and units.
+- No entity found: ask for clearer ID, model, descriptor, or keyword.
+- Multiple entities found: show top 3-5 choices with entity IDs and labels.
 - Missing intent: show short examples from that tenant's Business Profile.
 - Unsupported message type: ignore or give a concise supported-format reply depending on channel.
 - SML timeout: say the stock/price system is slow and ask the user to retry.
@@ -284,7 +320,7 @@ Required states:
 - Redact tokens, phone numbers, and raw sensitive SML payloads from logs.
 - Do not pass raw chat messages directly into SML tools without structured parsing.
 - Do not allow arbitrary tool names from the LLM or user text.
-- Do not hardcode business-specific product keywords, brand aliases, or tenant examples in source code.
+- Do not hardcode business-specific product/category keywords, brand aliases, or tenant examples in source code.
 - Do not feed raw channel logs into Thai query evaluation; use reviewed/redacted examples without chat IDs, user IDs, tokens, secrets, or raw provider payloads.
 - Validate LLM parse output with a strict JSON schema and confidence threshold.
 - Maintain an explicit allowlist of SML tools.
@@ -308,12 +344,14 @@ Log fields:
 - `userIdHash`
 - `messageId`
 - `intent`
+- `action`
+- `entityType`
 - `tenantId`
 - `businessType`
-- `productKeyword`
+- `queryHash`
 - `parserSource`
 - `parserConfidence`
-- `productCode`
+- `entityId`
 - `cacheHit`
 - `smlTool`
 - `smlLatencyMs`
@@ -381,7 +419,7 @@ Before production pilot:
 - Confirm whether price can be cached and for how long.
 - Decide the first Business Profile storage source: env file, JSON config, database table, or profile service.
 - Decide how tenant profile updates are validated and rolled back.
-- Decide whether product alias search requires local indexing after testing SML search quality.
+- Decide whether entity alias search requires local indexing after testing source-system search quality.
 
 ## 16. Suggested Implementation Order
 

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { loadBusinessProfile } from "../config/businessProfile.js";
+import { businessProfileSchema, loadBusinessProfile } from "../config/businessProfile.js";
 import { parseLookupQuery } from "./queryParser.js";
 
 const profile = loadBusinessProfile("profiles/construction-demo.json");
 
 describe("parseLookupQuery", () => {
   it("parses clear stock and price question", () => {
-    expect(parseLookupQuery("น้ำมัน มีไหม ราคาเท่าไร", profile)).toEqual({
+    expect(parseLookupQuery("น้ำมัน มีไหม ราคาเท่าไร", profile)).toMatchObject({
+      action: "availability_price",
+      entityType: "inventory_item",
       status: "parsed",
       intent: "stock_price",
       keyword: "น้ำมัน",
@@ -16,7 +18,9 @@ describe("parseLookupQuery", () => {
   });
 
   it("parses exact code command", () => {
-    expect(parseLookupQuery("/stock PAINT-01424", profile)).toEqual({
+    expect(parseLookupQuery("/stock PAINT-01424", profile)).toMatchObject({
+      action: "availability",
+      entityType: "inventory_item",
       status: "parsed",
       intent: "stock",
       keyword: "PAINT-01424",
@@ -26,14 +30,18 @@ describe("parseLookupQuery", () => {
   });
 
   it("parses embedded Thai stock questions", () => {
-    expect(parseLookupQuery("มีปูนเหลือไหม", profile)).toEqual({
+    expect(parseLookupQuery("มีปูนเหลือไหม", profile)).toMatchObject({
+      action: "availability",
+      entityType: "inventory_item",
       status: "parsed",
       intent: "stock",
       keyword: "ปูน",
       isExactCode: false,
       searchTerms: ["ปูน"]
     });
-    expect(parseLookupQuery("มีปูนไหม", profile)).toEqual({
+    expect(parseLookupQuery("มีปูนไหม", profile)).toMatchObject({
+      action: "availability",
+      entityType: "inventory_item",
       status: "parsed",
       intent: "stock",
       keyword: "ปูน",
@@ -43,7 +51,9 @@ describe("parseLookupQuery", () => {
   });
 
   it("keeps product names that start with the Thai existential prefix", () => {
-    expect(parseLookupQuery("มีด มีไหม", profile)).toEqual({
+    expect(parseLookupQuery("มีด มีไหม", profile)).toMatchObject({
+      action: "availability",
+      entityType: "inventory_item",
       status: "parsed",
       intent: "stock",
       keyword: "มีด",
@@ -80,6 +90,43 @@ describe("parseLookupQuery", () => {
     expect(parseLookupQuery("สวัสดีครับ", profile)).toEqual({
       status: "unsupported",
       reason: "intent_not_found"
+    });
+  });
+
+  it("reads slash command aliases from the domain profile", () => {
+    const genericProfile = businessProfileSchema.parse({
+      businessType: "generic",
+      domain: {
+        version: 2,
+        defaultEntityType: "catalog_entry",
+        entities: [{ type: "catalog_entry", label: "entry" }],
+        actions: [
+          {
+            id: "availability",
+            legacyIntent: "stock",
+            entityTypes: ["catalog_entry"],
+            phrases: ["available"],
+            commandAliases: ["avail"]
+          }
+        ],
+        connectors: []
+      },
+      enabledIntents: ["stock"],
+      intentPhrases: {
+        price: [],
+        search_product: [],
+        stock: [],
+        stock_price: []
+      },
+      tenantId: "generic"
+    });
+
+    expect(parseLookupQuery("/avail ABC123", genericProfile)).toMatchObject({
+      action: "availability",
+      entityType: "catalog_entry",
+      intent: "stock",
+      keyword: "ABC123",
+      status: "parsed"
     });
   });
 });

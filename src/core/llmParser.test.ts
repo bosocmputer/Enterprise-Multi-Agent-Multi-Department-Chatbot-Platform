@@ -47,6 +47,29 @@ describe("BusinessProfileLlmParser", () => {
     });
   });
 
+  it("accepts generic domain parser output", async () => {
+    const parser = parserFor(
+      JSON.stringify({
+        action: "availability",
+        confidence: 0.96,
+        entityType: "inventory_item",
+        query: "ปูนตราช้าง",
+        searchTerms: ["ปูนตราช้าง"]
+      })
+    );
+
+    await expect(parser.parse("มีปูนตราช้างเหลือไหม")).resolves.toMatchObject({
+      action: "availability",
+      confidence: 0.96,
+      entityType: "inventory_item",
+      intent: "stock",
+      keyword: "ปูนตราช้าง",
+      query: "ปูนตราช้าง",
+      searchTerms: ["ปูนตราช้าง"],
+      status: "parsed"
+    });
+  });
+
   it("rejects malformed JSON", async () => {
     await expect(parserFor("{").parse("มีปูนไหม")).resolves.toMatchObject({
       reason: "invalid_json",
@@ -61,6 +84,23 @@ describe("BusinessProfileLlmParser", () => {
           confidence: 0.95,
           intent: "inventory_inquiry",
           keyword: "ปูน",
+          searchTerms: ["ปูน"]
+        })
+      ).parse("มีปูนไหม")
+    ).resolves.toMatchObject({
+      reason: "invalid_schema",
+      status: "rejected"
+    });
+  });
+
+  it("rejects actions not allowed by the domain profile", async () => {
+    await expect(
+      parserFor(
+        JSON.stringify({
+          action: "delete",
+          confidence: 0.95,
+          entityType: "inventory_item",
+          query: "ปูน",
           searchTerms: ["ปูน"]
         })
       ).parse("มีปูนไหม")
