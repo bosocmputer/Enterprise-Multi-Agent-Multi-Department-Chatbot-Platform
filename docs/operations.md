@@ -217,13 +217,13 @@ Before adding staff testers beyond the dev account, run:
 
 ```bash
 cd /home/bosscatdog/parts-lookup-chatbot
-BASE_URL=http://127.0.0.1:3060 INTERNAL_API_TOKEN=<token> npm run qa:readiness -- --summary-only
+docker exec parts-lookup-api node dist/tools/readinessGate.js --summary-only
 ```
 
 Before inviting a larger Telegram pilot group, include the slower model path:
 
 ```bash
-BASE_URL=http://127.0.0.1:3060 INTERNAL_API_TOKEN=<token> npm run qa:readiness -- --include-llm --summary-only
+docker exec parts-lookup-api node dist/tools/readinessGate.js --include-llm --summary-only
 ```
 
 Readiness uses the project semantic layer in `docs/chatbot-qa-semantic-layer.md` and reviewed fixtures under `tools/chatbot-qa/fixtures/`. Reports omit raw QA text by default and use text hashes for review.

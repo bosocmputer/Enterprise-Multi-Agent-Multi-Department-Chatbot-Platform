@@ -20,6 +20,12 @@ INTERNAL_API_TOKEN=... \
 npm run qa:readiness -- --include-llm
 ```
 
+Inside the production container, use the built JavaScript entrypoint:
+
+```bash
+docker exec parts-lookup-api node dist/tools/readinessGate.js --summary-only
+```
+
 Useful tuning env:
 
 - `QA_CONCURRENCY_LEVELS=5,20,50`

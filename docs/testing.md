@@ -103,6 +103,12 @@ INTERNAL_API_TOKEN=<token> \
 npm run qa:readiness -- --summary-only
 ```
 
+Against a built container:
+
+```bash
+docker exec parts-lookup-api node dist/tools/readinessGate.js --summary-only
+```
+
 Run the slower LiteLLM assist cases before inviting staff:
 
 ```bash

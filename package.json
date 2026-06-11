@@ -8,6 +8,7 @@
     "start": "node dist/server.js",
     "build": "tsc -p tsconfig.json",
     "qa:readiness": "tsx src/tools/readinessGate.ts",
+    "qa:readiness:dist": "node dist/tools/readinessGate.js",
     "thai:evaluate": "python3 tools/thai-query-eval/thai_query_eval.py --profile profiles/construction-demo.json --input tools/thai-query-eval/fixtures/construction-demo.jsonl --output /tmp/thai-query-eval.json",
     "test": "vitest run",
     "test:watch": "vitest"
